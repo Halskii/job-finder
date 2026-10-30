@@ -145,13 +145,20 @@ def cmd_run(args, cfg, profile, conn) -> None:
     limit = args.limit or scfg.get("max_per_run", 40)
     todo = db.unscored(conn, limit)
     log(f"\nScoring {len(todo)} jobs with {scfg.get('model')}...")
+    tok_in = tok_out = 0
     for i, row in enumerate(todo, 1):
         try:
             res = scorer.score_job(client, scfg["model"], profile, row, cfg.get("min_pay", 0), resume_text)
             db.save_score(conn, row["id"], res["fit_score"], res["verdict"], res)
+            tok_in += res.get("_in", 0)
+            tok_out += res.get("_out", 0)
             log(f"  [{i}/{len(todo)}] {res['fit_score']:3d} {res['verdict']:5s} {row['company']} - {row['title']}")
         except Exception as e:
             log(f"  [{i}/{len(todo)}] error on {row['title']}: {type(e).__name__}: {str(e)[:80]}")
+    price = scfg.get("price_per_million_tokens", {})
+    cost = tok_in / 1e6 * price.get("input", 0) + tok_out / 1e6 * price.get("output", 0)
+    log(f"\nTokens: {tok_in:,} in / {tok_out:,} out | estimated cost ${cost:.3f} "
+        f"(uses the prices in config.yaml; check Anthropic's pricing page)")
     write_report(conn, cfg)
 
 

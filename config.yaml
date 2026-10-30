@@ -12,6 +12,7 @@ scoring:
   max_per_run: 40                    # cap LLM calls per run to control cost
   report_min_score: 60               # only show jobs scoring at least this in the report
   report_size: 25
+  price_per_million_tokens: {input: 1.0, output: 5.0}   # USD for the scoring model above; edit if prices change
 
 # Titles from filter.txt. Level markers (I, II, III, Associate, Junior) are stripped automatically,
 # so "Software Engineer I" also matches a posting titled just "Software Engineer".

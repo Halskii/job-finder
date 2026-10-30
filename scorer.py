@@ -46,6 +46,9 @@ def score_job(client, model: str, profile: dict, job, min_pay: int, resume_text:
     msg = client.messages.create(model=model, max_tokens=900, system=SYSTEM,
                                  messages=[{"role": "user", "content": user}])
     data = _extract_json(msg.content[0].text)
+    usage = getattr(msg, "usage", None)
+    data["_in"] = int(getattr(usage, "input_tokens", 0) or 0)
+    data["_out"] = int(getattr(usage, "output_tokens", 0) or 0)
     data["fit_score"] = max(0, min(100, int(data.get("fit_score", 0))))
     if data.get("verdict") not in ("apply", "maybe", "skip"):
         data["verdict"] = "maybe" if data["fit_score"] >= 60 else "skip"
