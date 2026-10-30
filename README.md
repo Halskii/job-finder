@@ -2,6 +2,8 @@
 
 A small pipeline that finds job postings that fit you, filters them, scores each one against a **verified profile** and your resume with Claude, shows the best ones in a local web page, and tracks the jobs you apply to. It never applies for you; you review and submit.
 
+> The source is public for review (for example by prospective employers). It is not licensed for reuse; see [License](#license).
+
 ```
 company job boards, remote feed, government sites
 (Greenhouse, Lever, Ashby, SmartRecruiters, Workday, Remotive, USAJobs, Texas HHS)
@@ -165,6 +167,7 @@ How it works:
 | `config.yaml`, `profile.json`, `.env` | Your own settings, verified facts, and keys. Git-ignored; never commit them |
 | `discovered_sources.yaml` | Boards added by `discover --add` and `workday-add` (created on first use, git-ignored) |
 | `jobs.db`, `reports/` | Stored postings, scores, and the tracker; daily Markdown reports (git-ignored) |
+| `LICENSE` | All rights reserved: viewable for evaluation, not for reuse |
 | `tests/` | Offline tests (`tests/data/` holds a saved page sample). Run with `python -m unittest` |
 
 ## Notes
@@ -174,3 +177,7 @@ How it works:
 - Be polite: requests are spaced by `request_delay`. Use this only for your own job search and respect each site's terms.
 - Not included on purpose: LinkedIn and Indeed scraping (against their terms and brittle), WorkInTexas and governmentjobs.com (their `robots.txt` asks automated programs to stay out), and auto-submitting applications.
 - Known limits: only companies on the supported boards are covered. Workday, SmartRecruiters, and Texas HHS postings need one extra request each for the full text, made only for title matches that are not stored yet (so ones rejected for age or pay are looked up again on later runs). The USAJobs source has not been run against the live API. The Texas HHS source depends on that site's page layout.
+
+## License
+
+All rights reserved. This repository is public so that it can be read and evaluated, not reused; see [LICENSE](LICENSE). The job-board data this program reads belongs to the companies and sites that publish it.

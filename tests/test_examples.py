@@ -71,6 +71,12 @@ class RepositoryHygieneTests(unittest.TestCase):
         for private in (".env", "config.yaml", "profile.json", "jobs.db", "reports/", "resume.pdf", "discovered_sources.yaml"):
             self.assertIn(private, lines)
 
+    def test_license_reserves_all_rights_and_is_not_an_open_source_license(self):
+        text = (ROOT / "LICENSE").read_text(encoding="utf-8")
+        self.assertIn("All rights reserved", text)
+        self.assertIn("may not copy", text)
+        self.assertNotIn("Permission is hereby granted", text)   # the MIT grant must not come back by accident
+
     def test_no_test_is_hidden_from_git(self):
         self.assertNotIn("test_exclusions.py", (ROOT / ".gitignore").read_text(encoding="utf-8"))
 
