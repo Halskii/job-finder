@@ -18,7 +18,9 @@ from pathlib import Path
 import yaml
 
 import db
+import discovery
 import filters
+import gov_sources
 import scorer
 import sources
 
@@ -68,11 +70,12 @@ def log(msg: str) -> None:
     print(msg, flush=True)
 
 
-def collect(cfg: dict) -> list[sources.Job]:
+def collect(cfg: dict, conn=None) -> list[sources.Job]:
     delay = cfg.get("request_delay", 0.4)
     src = cfg.get("sources", {})
     jobs: list[sources.Job] = []
-    plan = [("greenhouse", sources.fetch_greenhouse), ("lever", sources.fetch_lever), ("ashby", sources.fetch_ashby)]
+    plan = [("greenhouse", sources.fetch_greenhouse), ("lever", sources.fetch_lever), ("ashby", sources.fetch_ashby),
+            ("smartrecruiters", sources.fetch_smartrecruiters)]
     for kind, fn in plan:
         for slug in src.get(kind, []) or []:
             try:
@@ -90,19 +93,75 @@ def collect(cfg: dict) -> list[sources.Job]:
             jobs += got
         except Exception as e:
             log(f"  workday    {entry.get('name', entry['tenant']):18s} skipped ({type(e).__name__}: {str(e)[:70]})")
+    jobs += collect_feeds(cfg, conn)
+    jobs += collect_government(cfg)
     return jobs
+
+
+def collect_government(cfg: dict) -> list[sources.Job]:
+    """Federal (USAJobs, needs a free key in .env) and Texas HHS postings. On by default; set `enabled: false`
+    under `government:` in config.yaml to turn one off."""
+    gov = cfg.get("government") or {}
+    delay = cfg.get("request_delay", 0.4)
+    jobs: list[sources.Job] = []
+    uj = gov.get("usajobs") or {}
+    if uj.get("enabled", True):
+        load_env()
+        key, email = os.environ.get("USAJOBS_API_KEY"), os.environ.get("USAJOBS_EMAIL")
+        if not (key and email):
+            log("  usajobs    skipped (add USAJOBS_API_KEY and USAJOBS_EMAIL to .env; free key at developer.usajobs.gov/apirequest)")
+        else:
+            try:
+                got = gov_sources.fetch_usajobs(key, email, uj.get("keywords", ["software developer"]),
+                                                cfg.get("max_age_days", 30), uj.get("pages", 2), delay)
+                log(f"  usajobs    {'(federal)':18s} {len(got):4d} postings")
+                jobs += got
+            except Exception as e:
+                log(f"  usajobs    {'(federal)':18s} skipped ({type(e).__name__}: {str(e)[:70]})")
+    tx = gov.get("texas_hhs") or {}
+    if tx.get("enabled", True):
+        try:
+            got = gov_sources.fetch_texas_hhs(tx.get("search_terms", ["developer", "programmer"]), tx.get("pages", 2), delay)
+            log(f"  texas hhs  {'(HHSC/DFPS/DSHS)':18s} {len(got):4d} postings")
+            if not got:
+                log("             no postings found; the site's page layout may have changed")
+            jobs += got
+        except Exception as e:
+            log(f"  texas hhs  {'(HHSC/DFPS/DSHS)':18s} skipped ({type(e).__name__}: {str(e)[:70]})")
+    return jobs
+
+
+def collect_feeds(cfg: dict, conn) -> list[sources.Job]:
+    """Aggregator feeds. Remotive asks for at most about four requests a day, so it is fetched at most once per
+    `min_hours` (default 6), tracked in the database. Job pages link back to Remotive, as their terms require."""
+    rem = (cfg.get("feeds") or {}).get("remotive") or {}
+    if not rem.get("enabled") or conn is None:
+        return []
+    gap = float(rem.get("min_hours", 6)) * 3600
+    if time.time() - float(db.get_meta(conn, "remotive_last_fetch") or 0) < gap:
+        log("  remotive   skipped (fetched recently; Remotive asks for at most about 4 requests a day)")
+        return []
+    db.set_meta(conn, "remotive_last_fetch", str(time.time()))   # recorded before the call so failures don't cause retries
+    try:
+        got = sources.fetch_remotive(rem.get("categories", ["software-development"]))
+        log(f"  remotive   {'(feed)':18s} {len(got):4d} postings")
+        return got
+    except Exception as e:
+        log(f"  remotive   {'(feed)':18s} skipped ({type(e).__name__}: {str(e)[:70]})")
+        return []
 
 
 def cmd_run(args, cfg, profile, conn) -> None:
     log("Fetching postings...")
-    jobs = collect(cfg)
+    jobs = collect(cfg, conn)
     patterns = filters.base_titles(cfg["titles"])
+    gov_patterns = patterns + filters.base_titles(cfg.get("gov_titles", []))   # government titles read differently
     exclude = [w.lower() for w in cfg.get("exclude_title_words", [])]
     loc_excl = filters.compile_exclusions(cfg.get("exclude_locations", []))
-    stats = {"fetched": len(jobs), "title": 0, "location": 0, "excluded": 0, "pay": 0, "age": 0, "new": 0, "seen": 0}
+    stats = {"fetched": len(jobs), "title": 0, "location": 0, "excluded": 0, "pay": 0, "age": 0, "new": 0, "seen": 0, "dupe": 0}
 
     for job in jobs:
-        if not filters.title_ok(job.title, patterns, exclude):
+        if not filters.title_ok(job.title, gov_patterns if job.source in gov_sources.GOV_SOURCES else patterns, exclude):
             continue
         stats["title"] += 1
         if not filters.location_ok(job.location, cfg.get("us_only", True)):
@@ -114,9 +173,12 @@ def cmd_run(args, cfg, profile, conn) -> None:
         if conn.execute("SELECT 1 FROM jobs WHERE id=?", (job.id,)).fetchone():
             stats["seen"] += 1
             continue
-        if job.source == "workday":           # one extra request, only for title matches
+        if db.is_cross_source_duplicate(conn, job):   # same company + title already stored from another source
+            stats["dupe"] += 1
+            continue
+        if job.source in sources.DETAIL_FILLERS:      # one extra request, only for title matches
             try:
-                sources.fill_workday_detail(job)
+                sources.fill_detail(job)
                 time.sleep(cfg.get("request_delay", 0.4))
             except Exception:
                 continue
@@ -130,7 +192,7 @@ def cmd_run(args, cfg, profile, conn) -> None:
             stats["new"] += 1
 
     log(f"\nFetched {stats['fetched']} | title match {stats['title']} | after location {stats['location']} | "
-        f"excluded locations {stats['excluded']} | already seen {stats['seen']} | too old {stats['age']} | "
+        f"excluded locations {stats['excluded']} | already seen {stats['seen']} | duplicates {stats['dupe']} | too old {stats['age']} | "
         f"below pay {stats['pay']} | NEW {stats['new']}")
 
     if args.no_llm:
@@ -219,6 +281,60 @@ def cmd_list(args, cfg, profile, conn) -> None:
         log(f"{r['score']:3d} {r['verdict']:5s} {r['company']:18s} {r['title'][:55]:55s} {r['id']}")
 
 
+def cmd_discover(args, cfg, profile, conn) -> None:
+    """Look for job boards by company name. Shows what it finds; saves only with --add."""
+    names = list(args.names)
+    if args.file:
+        names += [ln.strip() for ln in Path(args.file).read_text(encoding="utf-8").splitlines()
+                  if ln.strip() and not ln.lstrip().startswith("#")]
+    if not names:
+        log("Give company names, e.g.  python main.py discover Stripe Datadog   (or --file companies.txt, one name per line)")
+        return
+    have = cfg.get("sources", {})
+    found: dict[str, list[str]] = {}
+    for name in names:
+        hits = discovery.probe(name, cfg.get("request_delay", 0.4))
+        if not hits:
+            log(f"{name}: no board found on {', '.join(discovery.LIST_KEYS)}. If it uses Workday, run: "
+                f"python main.py workday-add <careers page URL>")
+            continue
+        for h in hits:
+            m = discovery.matching(h.jobs, cfg)
+            known = h.slug.lower() in {str(x).lower() for x in have.get(h.system, []) or []}
+            log(f"{name}: {h.system}/{h.slug}: {len(h.jobs)} postings, {len(m)} match your filters"
+                f"{' (already in your sources)' if known else ''}")
+            sample = (m or h.jobs)[0]
+            log(f"    e.g. {sample.title} | {sample.location} | {sample.url}")
+            if not known:
+                found.setdefault(h.system, []).append(h.slug)
+    total = sum(len(v) for v in found.values())
+    if not total:
+        log("\nNothing new to add.")
+    elif args.add:
+        discovery.save_discovered(ROOT, found)
+        log(f"\nSaved {total} board(s) to {discovery.DISCOVERED_FILE}. They are searched on the next run.")
+    else:
+        log(f"\n{total} new board(s) found, nothing saved. Check the examples above are the right company, "
+            f"then run again with --add.")
+
+
+def cmd_workday_add(args, cfg, profile, conn) -> None:
+    """Add a Workday careers site from any page address on it."""
+    try:
+        entry = discovery.parse_workday_url(args.url, args.name)
+    except ValueError as e:
+        log(str(e))
+        return
+    try:
+        total = discovery.check_workday(entry)
+    except Exception as e:
+        log(f"Could not read {entry['host']} / {entry['site']} ({type(e).__name__}: {str(e)[:80]}). Nothing saved.")
+        return
+    log(f"Workday site {entry['host']} / {entry['site']}: {total} postings.")
+    discovery.save_discovered(ROOT, {"workday": [entry]})
+    log(f"Saved as '{entry['name']}' in {discovery.DISCOVERED_FILE} (use --name to change the label).")
+
+
 def cmd_profile(args, cfg, profile, conn) -> None:
     """Rebuild profile.json from resume.pdf, show the differences, and write it only with approval."""
     import shutil
@@ -280,12 +396,20 @@ def main() -> None:
     m.add_argument("id", help="job id or any unique fragment of it")
     m.add_argument("status")
     m.add_argument("note", nargs="?")
+    d = sub.add_parser("discover", help="find job boards by company name (Greenhouse, Lever, Ashby, SmartRecruiters)")
+    d.add_argument("names", nargs="*", help="company names")
+    d.add_argument("--file", help="text file with one company name per line")
+    d.add_argument("--add", action="store_true", help="save the boards it finds")
+    w = sub.add_parser("workday-add", help="add a Workday careers site from its web address")
+    w.add_argument("url")
+    w.add_argument("--name", help="label to show for the company")
     args = ap.parse_args()
 
-    cfg = yaml.safe_load((ROOT / "config.yaml").read_text(encoding="utf-8"))
+    cfg = discovery.load_config(ROOT)
     profile = json.loads((ROOT / "profile.json").read_text(encoding="utf-8"))
     conn = db.connect(str(ROOT / "jobs.db"))
-    {"run": cmd_run, "list": cmd_list, "mark": cmd_mark, "profile": cmd_profile}[args.cmd](args, cfg, profile, conn)
+    {"run": cmd_run, "list": cmd_list, "mark": cmd_mark, "profile": cmd_profile,
+     "discover": cmd_discover, "workday-add": cmd_workday_add}[args.cmd](args, cfg, profile, conn)
 
 
 if __name__ == "__main__":

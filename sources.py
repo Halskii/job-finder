@@ -1,4 +1,4 @@
-"""Fetch job postings from public job-board APIs (Greenhouse, Lever, Ashby, Workday).
+"""Fetch job postings from public job-board APIs (Greenhouse, Lever, Ashby, Workday, SmartRecruiters) and the Remotive feed.
 
 Only public endpoints that the boards themselves expose are used. No logins, no scraping of
 sites that forbid it. Every fetcher returns a list of Job objects and never raises on a bad slug.
@@ -175,3 +175,81 @@ def fill_workday_detail(job: Job) -> None:
     if info.get("location") and not job.location:
         job.location = info["location"]
     job.pay_min, job.pay_max = extract_pay(job.description)
+
+
+# ----------------------------------------------------------------------------- SmartRecruiters
+SR_PAGE = 100
+SR_MAX = 500   # per company; the list is already limited to US postings
+
+
+def fetch_smartrecruiters(slug: str) -> list[Job]:
+    """List a company's US postings. The list has no description, so details are filled in later and only
+    for postings that pass the title filter (see fill_detail). An unknown company id returns an empty list."""
+    jobs: list[Job] = []
+    offset = 0
+    while offset < SR_MAX:
+        data = _get(f"https://api.smartrecruiters.com/v1/companies/{slug}/postings",
+                    params={"limit": SR_PAGE, "offset": offset, "country": "us"})
+        page = data.get("content", [])
+        for p in page:
+            loc = p.get("location") or {}
+            where = loc.get("fullLocation") or ", ".join(x for x in (loc.get("city"), loc.get("region")) if x)
+            if loc.get("remote") and "remote" not in where.lower():
+                where = f"{where} (Remote)".strip()
+            company = (p.get("company") or {}).get("name") or slug
+            jobs.append(Job(
+                id=f"sr:{slug.lower()}:{p['id']}", source="smartrecruiters", company=company,
+                title=p.get("name", ""), location=where,
+                url=f"https://jobs.smartrecruiters.com/{slug}/{p['id']}",
+                posted=(p.get("releasedDate") or "")[:10] or None,
+                detail={"api": f"https://api.smartrecruiters.com/v1/companies/{slug}/postings/{p['id']}"},
+            ))
+        offset += SR_PAGE
+        if not page or offset >= data.get("totalFound", 0):
+            break
+    return jobs
+
+
+def fill_smartrecruiters_detail(job: Job) -> None:
+    info = _get(job.detail["api"])
+    sections = (info.get("jobAd") or {}).get("sections") or {}
+    parts = [strip_html((sections.get(k) or {}).get("text", ""))
+             for k in ("jobDescription", "qualifications", "additionalInformation")]
+    job.description = "\n\n".join(p for p in parts if p)
+    job.posted = (info.get("releasedDate") or "")[:10] or job.posted
+    job.url = info.get("postingUrl") or job.url
+    job.pay_min, job.pay_max = extract_pay(job.description)
+
+
+# Sources whose list call has no description. Each maps to a function that fetches the full posting and raises on
+# failure. gov_sources.py registers its own entry when imported.
+DETAIL_FILLERS = {"workday": fill_workday_detail, "smartrecruiters": fill_smartrecruiters_detail}
+
+
+def fill_detail(job: Job) -> None:
+    DETAIL_FILLERS[job.source](job)
+
+
+# ----------------------------------------------------------------------------- Remotive (feed)
+def fetch_remotive(categories: list[str]) -> list[Job]:
+    """Remotive's public feed of remote jobs. Their terms ask for a link back to the Remotive page and a mention
+    of Remotive as the source (both kept: Job.url is the Remotive page, Job.source is 'remotive') and no more
+    than about four requests a day (main.py enforces a minimum gap between fetches)."""
+    seen: dict[int, Job] = {}
+    for cat in categories:
+        data = _get("https://remotive.com/api/remote-jobs", params={"category": cat})
+        for j in data.get("jobs", []):
+            if j["id"] in seen:
+                continue
+            desc = strip_html(j.get("description", ""))
+            lo, hi = extract_pay(j.get("salary") or "")
+            if lo is None:
+                lo, hi = extract_pay(desc)
+            seen[j["id"]] = Job(
+                id=f"rm:{j['id']}", source="remotive", company=j.get("company_name", ""),
+                title=j.get("title", ""), location=j.get("candidate_required_location") or "Remote",
+                url=j.get("url", ""), posted=(j.get("publication_date") or "")[:10] or None,
+                description=desc, pay_min=lo, pay_max=hi,
+            )
+    return list(seen.values())
+
