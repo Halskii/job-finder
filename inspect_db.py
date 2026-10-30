@@ -4,6 +4,13 @@ import sys
 
 c = sqlite3.connect("jobs.db")
 c.row_factory = sqlite3.Row
+if "--where" in sys.argv:   # python inspect_db.py --where "california"  -> stored jobs whose location contains the text
+    term = sys.argv[sys.argv.index("--where") + 1].lower()
+    hits = [r for r in c.execute("SELECT company,title,location FROM jobs") if term in (r["location"] or "").lower()]
+    print(f"{len(hits)} stored job(s) with '{term}' in the location")
+    for r in hits[:15]:
+        print(f"  {r['company'][:14]:14s} {r['title'][:45]:45s} | {(r['location'] or '')[:55]}")
+    sys.exit()
 if "--odd" in sys.argv:
     for r in c.execute("SELECT company,title,location FROM jobs WHERE lower(title) LIKE '%senior%' OR lower(title) LIKE '%staff%' "
                        "OR lower(title) LIKE '%lead%'"):

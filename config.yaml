@@ -6,7 +6,7 @@ us_only: true             # drop postings whose location looks outside the US
 request_delay: 0.4        # seconds between HTTP requests (be polite to job boards)
 
 profile_model: claude-sonnet-5-5   # used by `main.py profile` to read resume.pdf
-
+exclude_locations:
 scoring:
   model: claude-haiku-4-5-20251001   # cheap first pass; switch to claude-sonnet-5-5 for deeper analysis
   max_per_run: 40                    # cap LLM calls per run to control cost
