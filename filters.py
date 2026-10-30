@@ -28,16 +28,35 @@ def _norm(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
-def base_titles(titles: list[str]) -> list[re.Pattern]:
-    """'Software Engineer I' and 'Associate Software Engineer' both become the pattern \\bsoftware engineer\\b."""
-    seen, patterns = set(), []
+def base_title_strings(titles: list[str]) -> list[str]:
+    """'Software Engineer I' and 'Associate Software Engineer' both become 'software engineer'. Order kept, no repeats."""
+    seen, out = set(), []
     for t in titles:
-        words = [w for w in _norm(t).split() if w not in LEVEL_WORDS]
-        base = " ".join(words)
+        base = " ".join(w for w in _norm(t).split() if w not in LEVEL_WORDS)
         if base and base not in seen:
             seen.add(base)
-            patterns.append(re.compile(r"(?<![a-z0-9])" + re.escape(base) + r"(?![a-z0-9])"))
-    return patterns
+            out.append(base)
+    return out
+
+
+def base_titles(titles: list[str]) -> list[re.Pattern]:
+    """One whole-word pattern per base title (see base_title_strings)."""
+    return [re.compile(r"(?<![a-z0-9])" + re.escape(b) + r"(?![a-z0-9])") for b in base_title_strings(titles)]
+
+
+def workday_terms(cfg: dict) -> list[str]:
+    """Search words for Workday sites. `workday_search_terms` may be 'auto' (the base titles from `titles`), a list of
+    words, or a list that contains 'auto' plus extra words. If it is missing, it means 'auto'."""
+    raw = cfg.get("workday_search_terms", "auto")
+    raw = [raw] if isinstance(raw, str) else list(raw or [])
+    out, seen = [], set()
+    for entry in raw:
+        entry = str(entry).strip()
+        for term in (base_title_strings(cfg.get("titles", [])) if entry.lower() == "auto" else [entry]):
+            if term and term.lower() not in seen:
+                seen.add(term.lower())
+                out.append(term)
+    return out
 
 
 def title_ok(title: str, patterns: list[re.Pattern], exclude_words: list[str]) -> bool:

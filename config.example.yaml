@@ -43,9 +43,13 @@ titles:
 # Titles containing any of these words are dropped (adjust to your experience level).
 exclude_title_words: [senior, sr, staff, principal, lead, manager, director, head, vp, intern, internship, architect]
 
-# Search words used for Workday sites (they have a free-text title search).
-workday_search_terms: ["software engineer", "platform engineer", "devops", "cloud engineer", "ai engineer", "machine learning", "site reliability", "automation engineer"]
+# Search words for Workday sites (they have a free-text title search). 'auto' derives them from `titles` above
+# (level markers like I / II / III / Associate / Junior are dropped), so you only edit one list. You can also give
+# your own list, or mix: [auto, devops, "machine learning"] adds extra words to the derived ones.
+workday_search_terms: auto
 workday_max_pages: 3
+workday_workers: 6        # Workday sites read at the same time (each site still gets one request at a time)
+detail_workers: 6         # servers asked for full postings at the same time (same rule: one request at a time per server)
 
 # Job boards. Add any company that uses these systems (or let `main.py discover` / `main.py workday-add` do it for you):
 #   Greenhouse:      boards.greenhouse.io/<slug> or job-boards.greenhouse.io/<slug>

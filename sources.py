@@ -147,13 +147,17 @@ def fetch_workday(entry: dict, search_terms: list[str], max_pages: int, delay: f
     base = f"https://{host}/wday/cxs/{tenant}/{site}"
     seen: dict[str, Job] = {}
     for term in search_terms:
+        total = None
         for page in range(max_pages):
             body = {"appliedFacets": {}, "limit": 20, "offset": page * 20, "searchText": term}
             r = requests.post(f"{base}/jobs", json=body, headers={**UA, "Content-Type": "application/json"}, timeout=TIMEOUT)
             r.raise_for_status()
-            postings = r.json().get("jobPostings", [])
+            data = r.json()
+            postings = data.get("jobPostings", [])
             if not postings:
                 break
+            if page == 0:
+                total = data.get("total")   # Workday reports the total on the first page only
             for p in postings:
                 path = p.get("externalPath", "")
                 if not path or path in seen:
@@ -165,6 +169,8 @@ def fetch_workday(entry: dict, search_terms: list[str], max_pages: int, delay: f
                     detail={"api": f"{base}{path}"},
                 )
             time.sleep(delay)
+            if len(postings) < 20 or (total is not None and (page + 1) * 20 >= total):
+                break   # that was the last page; don't ask for an empty one
     return list(seen.values())
 
 
@@ -172,8 +178,11 @@ def fill_workday_detail(job: Job) -> None:
     info = _get(job.detail["api"]).get("jobPostingInfo", {})
     job.description = strip_html(info.get("jobDescription", ""))
     job.posted = (info.get("startDate") or "")[:10] or None
-    if info.get("location") and not job.location:
-        job.location = info["location"]
+    # The list only says "6 Locations" for a multi-location posting. The real places are in the detail, and the location
+    # filters need them: a "2 Locations" job can turn out to be in Australia, or in California.
+    places = [p for p in [info.get("location"), *(info.get("additionalLocations") or [])] if p]
+    if places and (not job.location or re.fullmatch(r"\d+ Locations?", job.location)):
+        job.location = "; ".join(places)
     job.pay_min, job.pay_max = extract_pay(job.description)
 
 

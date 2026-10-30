@@ -13,8 +13,10 @@ import os
 import re
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from pathlib import Path
+from urllib.parse import urlparse
 
 import yaml
 
@@ -90,17 +92,57 @@ def collect(cfg: dict, conn=None) -> list[sources.Job]:
             except Exception as e:  # bad slug, rate limit, network: skip and keep going
                 log(f"  {kind:10s} {slug:18s} skipped ({type(e).__name__}: {str(e)[:70]})")
             time.sleep(delay)
-    for entry in src.get("workday", []) or []:
-        try:
-            got = sources.fetch_workday(entry, cfg.get("workday_search_terms", ["software engineer"]),
-                                        cfg.get("workday_max_pages", 3), delay)
-            log(f"  workday    {entry.get('name', entry['tenant']):18s} {len(got):4d} postings")
-            jobs += got
-        except Exception as e:
-            log(f"  workday    {entry.get('name', entry['tenant']):18s} skipped ({type(e).__name__}: {str(e)[:70]})")
+    jobs += collect_workday(cfg, src.get("workday", []) or [], delay)
     jobs += collect_feeds(cfg, conn)
     jobs += collect_government(cfg)
     return jobs
+
+
+def collect_workday(cfg: dict, entries: list[dict], delay: float) -> list[sources.Job]:
+    """Read every Workday site. Sites are different servers, so several are read at once (`workday_workers`, default 6);
+    each site is still read one request at a time, with `request_delay` between requests."""
+    terms, pages = filters.workday_terms(cfg), cfg.get("workday_max_pages", 3)
+
+    def one(entry):
+        try:
+            return entry, sources.fetch_workday(entry, terms, pages, delay), None
+        except Exception as e:   # a site that is down or renamed must not stop the others
+            return entry, [], e
+
+    jobs: list[sources.Job] = []
+    with ThreadPoolExecutor(max_workers=max(1, int(cfg.get("workday_workers", 6)))) as pool:
+        for entry, got, err in pool.map(one, entries):
+            name = entry.get("name", entry["tenant"])
+            if err:
+                log(f"  workday    {name:18s} skipped ({type(err).__name__}: {str(err)[:70]})")
+            else:
+                log(f"  workday    {name:18s} {len(got):4d} postings")
+                jobs += got
+    return jobs
+
+
+def prefetch_details(jobs: list[sources.Job], workers: int, delay: float) -> set[str]:
+    """Fetch the full posting for each job. Jobs are grouped by server: different servers are asked at the same time
+    (up to `workers`), but one server only ever gets one request at a time. Returns the ids that failed."""
+    by_host: dict[str, list[sources.Job]] = {}
+    for j in jobs:
+        by_host.setdefault(urlparse(j.detail.get("api") or j.url).netloc, []).append(j)
+
+    def fetch_group(group):
+        bad = []
+        for j in group:
+            try:
+                sources.fill_detail(j)
+            except Exception:
+                bad.append(j.id)
+            time.sleep(delay)
+        return bad
+
+    failed: set[str] = set()
+    with ThreadPoolExecutor(max_workers=max(1, int(workers))) as pool:
+        for bad in pool.map(fetch_group, by_host.values()):
+            failed.update(bad)
+    return failed
 
 
 def collect_government(cfg: dict) -> list[sources.Job]:
@@ -163,8 +205,9 @@ def cmd_run(args, cfg, profile, conn) -> None:
     gov_patterns = patterns + filters.base_titles(cfg.get("gov_titles", []))   # government titles read differently
     exclude = [w.lower() for w in cfg.get("exclude_title_words", [])]
     loc_excl = filters.compile_exclusions(cfg.get("exclude_locations", []))
-    stats = {"fetched": len(jobs), "title": 0, "location": 0, "excluded": 0, "pay": 0, "age": 0, "new": 0, "seen": 0, "dupe": 0}
+    stats = {"fetched": len(jobs), "title": 0, "location": 0, "excluded": 0, "pay": 0, "age": 0, "new": 0, "seen": 0, "dupe": 0, "late": 0}
 
+    candidates = []
     for job in jobs:
         if not filters.title_ok(job.title, gov_patterns if job.source in gov_sources.GOV_SOURCES else patterns, exclude):
             continue
@@ -178,15 +221,23 @@ def cmd_run(args, cfg, profile, conn) -> None:
         if conn.execute("SELECT 1 FROM jobs WHERE id=?", (job.id,)).fetchone():
             stats["seen"] += 1
             continue
+        candidates.append(job)
+
+    # Sources whose lists have no description need one extra request per job. Only jobs that passed the cheap filters
+    # above, and are not already stored from another source, are looked up, several servers at a time.
+    need = [j for j in candidates if j.source in sources.DETAIL_FILLERS and not db.is_cross_source_duplicate(conn, j)]
+    failed = prefetch_details(need, cfg.get("detail_workers", 6), cfg.get("request_delay", 0.4)) if need else set()
+
+    for job in candidates:
         if db.is_cross_source_duplicate(conn, job):   # same company + title already stored from another source
             stats["dupe"] += 1
             continue
-        if job.source in sources.DETAIL_FILLERS:      # one extra request, only for title matches
-            try:
-                sources.fill_detail(job)
-                time.sleep(cfg.get("request_delay", 0.4))
-            except Exception:
-                continue
+        if job.id in failed:
+            continue
+        if job.source in sources.DETAIL_FILLERS and not (filters.location_ok(job.location, cfg.get("us_only", True))
+                                                         and filters.exclusion_ok(job.location, loc_excl)):
+            stats["late"] += 1   # the full posting revealed the real location(s), and none are allowed
+            continue
         if not filters.age_ok(job.posted, cfg.get("max_age_days", 30)):
             stats["age"] += 1
             continue
@@ -197,7 +248,7 @@ def cmd_run(args, cfg, profile, conn) -> None:
             stats["new"] += 1
 
     log(f"\nFetched {stats['fetched']} | title match {stats['title']} | after location {stats['location']} | "
-        f"excluded locations {stats['excluded']} | already seen {stats['seen']} | duplicates {stats['dupe']} | too old {stats['age']} | "
+        f"excluded locations {stats['excluded']} | already seen {stats['seen']} | duplicates {stats['dupe']} | dropped by full location {stats['late']} | too old {stats['age']} | "
         f"below pay {stats['pay']} | NEW {stats['new']}")
 
     if args.no_llm:
