@@ -1,0 +1,10 @@
+.venv/
+.env
+jobs.db
+reports/
+__pycache__/
+*.pyc
+resume.txt
+resume/
+resume.pdf
+profile.json.bak
