@@ -40,12 +40,22 @@ You can call the virtual environment's Python directly without activating it, fo
 | `python main.py run --limit 10` | Full run, but score at most 10 jobs |
 | `python main.py list --top 15` | Best scored jobs from the database |
 | `python main.py mark <id> applied "note"` | Update the tracker. `<id>` can be any unique fragment of a job id |
+| `python viewer.py` | Open the report viewer in your browser (see below) |
 | `python inspect_db.py` | Peek at what is stored |
 | `python -m unittest -v` | Run the offline tests (no network, no API key) |
 
 Statuses: `new, saved, applied, skipped, interview, rejected, offer`. Jobs you mark are excluded from future reports.
 
 Typical first run: `profile` (review the diff, answer `y`), then `run`, then read the newest file in `reports/`.
+
+## Viewing matches in the browser
+
+`python viewer.py` starts a small local server (`http://127.0.0.1:8765/`, your machine only) and opens it. It reads the Markdown files in `reports/`, so the list in the sidebar is exactly what the report says, and joins each entry to the stored posting in `jobs.db` by its `ID` line.
+
+- Sidebar: pick a report date, filter by title or company, click a job (or press `j` / `k` to move). Each job has its own address (`#id`), so back and forward work.
+- Detail pane: score, verdict, matched and missing skills, resume angle, and the full stored posting text. **Open original posting** opens the real page in a new tab. Job sites generally forbid embedding their pages in another page, so the posting is shown from the saved copy instead.
+- Buttons `saved`, `applied`, `skipped`, `interview` update the tracker, same as `main.py mark`. Applied and skipped jobs drop out of future reports.
+- Options: `--port 8765`, `--no-open`. Stop it with Ctrl+C.
 
 ## Your profile and resume
 
@@ -56,6 +66,7 @@ Typical first run: `profile` (review the diff, answer `y`), then `run`, then rea
 ## Configuration (`config.yaml`)
 
 - `min_pay`, `max_age_days`, `us_only`, `request_delay`
+- `exclude_locations`: places to drop (California and its major cities are pre-filled). A posting is dropped only if **every** location it lists matches, so "San Francisco, CA | Remote - US" is kept because the remote option is still open to you. Matching is whole-word and case-insensitive, except two-letter state codes, which must be capitalized (`CA`). Add or remove entries freely, or delete the list to turn it off. Check what's stored with `python inspect_db.py --where "california"`.
 - `titles`: your title list (from `filter.txt`), and `exclude_title_words`
 - `scoring`: `model`, `max_per_run` (cost cap), `report_min_score`, `report_size`
 - `profile_model`: the model used by `main.py profile`
@@ -73,6 +84,7 @@ Typical first run: `profile` (review the diff, answer `y`), then `run`, then rea
 | `scorer.py` | Claude fit scoring |
 | `profile_gen.py` | Builds `profile.json` from the resume |
 | `db.py` | SQLite storage, dedupe, and tracker |
+| `viewer.py` | Local web viewer for the reports |
 | `config.yaml`, `profile.json` | Your settings and verified facts |
 | `test_*.py` | Offline tests |
 | `.env` | Your API key (git-ignored; never commit it) |

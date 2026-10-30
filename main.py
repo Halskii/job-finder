@@ -98,7 +98,8 @@ def cmd_run(args, cfg, profile, conn) -> None:
     jobs = collect(cfg)
     patterns = filters.base_titles(cfg["titles"])
     exclude = [w.lower() for w in cfg.get("exclude_title_words", [])]
-    stats = {"fetched": len(jobs), "title": 0, "location": 0, "pay": 0, "age": 0, "new": 0, "seen": 0}
+    loc_excl = filters.compile_exclusions(cfg.get("exclude_locations", []))
+    stats = {"fetched": len(jobs), "title": 0, "location": 0, "excluded": 0, "pay": 0, "age": 0, "new": 0, "seen": 0}
 
     for job in jobs:
         if not filters.title_ok(job.title, patterns, exclude):
@@ -107,6 +108,9 @@ def cmd_run(args, cfg, profile, conn) -> None:
         if not filters.location_ok(job.location, cfg.get("us_only", True)):
             continue
         stats["location"] += 1
+        if not filters.exclusion_ok(job.location, loc_excl):
+            stats["excluded"] += 1
+            continue
         if conn.execute("SELECT 1 FROM jobs WHERE id=?", (job.id,)).fetchone():
             stats["seen"] += 1
             continue
@@ -126,7 +130,8 @@ def cmd_run(args, cfg, profile, conn) -> None:
             stats["new"] += 1
 
     log(f"\nFetched {stats['fetched']} | title match {stats['title']} | after location {stats['location']} | "
-        f"already seen {stats['seen']} | too old {stats['age']} | below pay {stats['pay']} | NEW {stats['new']}")
+        f"excluded locations {stats['excluded']} | already seen {stats['seen']} | too old {stats['age']} | "
+        f"below pay {stats['pay']} | NEW {stats['new']}")
 
     if args.no_llm:
         log("Skipping LLM scoring (--no-llm). Jobs are stored; run again without the flag to score them.")
@@ -143,7 +148,9 @@ def cmd_run(args, cfg, profile, conn) -> None:
     log(f"Resume context: {'loaded' if resume_text else 'none (add resume.txt)'}")
     scfg = cfg.get("scoring", {})
     limit = args.limit or scfg.get("max_per_run", 40)
-    todo = db.unscored(conn, limit)
+    loc_excl = filters.compile_exclusions(cfg.get("exclude_locations", []))
+    # jobs stored before an exclusion was added must not be scored (that would waste API credits)
+    todo = visible(db.unscored(conn, limit * 4), loc_excl)[:limit]
     log(f"\nScoring {len(todo)} jobs with {scfg.get('model')}...")
     tok_in = tok_out = 0
     for i, row in enumerate(todo, 1):
@@ -162,13 +169,20 @@ def cmd_run(args, cfg, profile, conn) -> None:
     write_report(conn, cfg)
 
 
+def visible(rows, loc_excl) -> list:
+    """Drop stored rows whose location is excluded by the current config."""
+    return [r for r in rows if filters.exclusion_ok(r["location"], loc_excl)]
+
+
 def money(v) -> str:
     return f"${v:,}" if v else "?"
 
 
 def write_report(conn, cfg) -> Path | None:
     scfg = cfg.get("scoring", {})
-    rows = db.top(conn, scfg.get("report_size", 25), scfg.get("report_min_score", 60))
+    size = scfg.get("report_size", 25)
+    rows = visible(db.top(conn, size * 4, scfg.get("report_min_score", 60)),
+                   filters.compile_exclusions(cfg.get("exclude_locations", [])))[:size]
     out_dir = ROOT / "reports"
     out_dir.mkdir(exist_ok=True)
     path = out_dir / f"{date.today().isoformat()}.md"
@@ -196,7 +210,8 @@ def write_report(conn, cfg) -> Path | None:
 
 def cmd_list(args, cfg, profile, conn) -> None:
     scfg = cfg.get("scoring", {})
-    rows = db.top(conn, args.top, args.min_score if args.min_score is not None else scfg.get("report_min_score", 60))
+    rows = visible(db.top(conn, args.top * 4, args.min_score if args.min_score is not None else scfg.get("report_min_score", 60)),
+                   filters.compile_exclusions(cfg.get("exclude_locations", [])))[:args.top]
     if not rows:
         log("Nothing scored at that threshold yet. Run: python main.py run")
         return
