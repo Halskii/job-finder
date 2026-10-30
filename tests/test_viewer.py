@@ -130,10 +130,12 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(self.get("/api/reports", {"Host": "evil.example.com"})[0], 403)
 
     def test_mark_status(self):
-        self.assertEqual(self.post("/api/mark", {"id": "greenhouse:stripe:1", "status": "applied"}), (200, {"updated": 1}))
+        status, body = self.post("/api/mark", {"id": "greenhouse:stripe:1", "status": "applied"})
+        self.assertEqual((status, body["updated"]), (200, 1))
         data = json.loads(self.get("/api/report/2026-10-30.md")[1])
         self.assertEqual(data["jobs"][0]["status"], "applied")
-        self.assertEqual(self.post("/api/mark", {"id": "nope", "status": "saved"}), (200, {"updated": 0}))
+        status, body = self.post("/api/mark", {"id": "nope", "status": "saved"})
+        self.assertEqual((status, body["updated"]), (200, 0))
 
     def test_mark_rejects_bad_input(self):
         self.assertEqual(self.post("/api/mark", {"id": "greenhouse:stripe:1", "status": "deleted"})[0], 400)

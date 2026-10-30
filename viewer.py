@@ -7,17 +7,19 @@ from __future__ import annotations
 import argparse
 import json
 import re
-import sqlite3
 import sys
 import webbrowser
+from datetime import date
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
+import db
+
 ROOT = Path(__file__).parent
 REPORTS = ROOT / "reports"
 DB_PATH = ROOT / "jobs.db"
-STATUSES = ("new", "saved", "applied", "skipped", "interview", "rejected", "offer")
+STATUSES = ("new", "saved", "applied", "skipped", "interview", "offer", "accepted", "rejected", "withdrawn")
 
 HEADER_RE = re.compile(r"^## (\d+) \| (.+)$")
 META_RE = re.compile(r"^- Location: (.*) \| Pay: (.*) \| Posted: (.*)$")   # location itself may contain '|'
@@ -78,8 +80,7 @@ def load_report(name: str) -> dict | None:
     if name not in report_names():   # whitelist: also blocks path traversal
         return None
     data = parse_report((REPORTS / name).read_text(encoding="utf-8"))
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
+    conn = db.connect(str(DB_PATH))   # also upgrades an older database (adds the applied_at column)
     try:
         for j in data["jobs"]:
             row = conn.execute("SELECT * FROM jobs WHERE id=?", (j.get("id"),)).fetchone() if j.get("id") else None
@@ -88,9 +89,9 @@ def load_report(name: str) -> dict | None:
                 title, company = row["title"], row["company"]
                 j.setdefault("url", row["url"])
                 j["description"] = row["description"] or ""
-                j["status"], j["notes"] = row["status"] or "new", row["notes"] or ""
+                j["status"], j["notes"], j["applied_at"] = row["status"] or "new", row["notes"] or "", row["applied_at"]
             else:
-                j["description"], j["status"], j["notes"] = "", "new", ""
+                j["description"], j["status"], j["notes"], j["applied_at"] = "", "new", "", None
             j["title"], j["company"] = title, company
             j["url"] = safe_url(j.get("url", ""))
     finally:
@@ -98,12 +99,45 @@ def load_report(name: str) -> dict | None:
     return data
 
 
-def mark_status(job_id: str, status: str) -> int:
-    conn = sqlite3.connect(DB_PATH)
+def mark_status(job_id: str, status: str) -> dict:
+    """Set a job's status. An applied-type status records today as the date applied (unless one is already stored);
+    any other status removes the job from the tracker. Returns how many rows changed and the resulting date."""
+    conn = db.connect(str(DB_PATH))
     try:
-        cur = conn.execute("UPDATE jobs SET status=? WHERE id=?", (status, job_id))
-        conn.commit()
-        return cur.rowcount
+        n = db.set_status_exact(conn, job_id, status)
+        row = conn.execute("SELECT applied_at FROM jobs WHERE id=?", (job_id,)).fetchone()
+        return {"updated": n, "applied_at": row["applied_at"] if row else None}
+    finally:
+        conn.close()
+
+
+def parse_day(value) -> date | None:
+    """A YYYY-MM-DD string that is a real date and not in the future, else None."""
+    if not isinstance(value, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+        return None
+    try:
+        day = date.fromisoformat(value)
+    except ValueError:
+        return None
+    return day if day <= date.today() else None
+
+
+def set_applied_date(job_id: str, day: date) -> int:
+    conn = db.connect(str(DB_PATH))
+    try:
+        return db.set_applied_date(conn, job_id, day)
+    finally:
+        conn.close()
+
+
+def load_tracker() -> dict:
+    """Counts for this week / this month / all time, and every tracked application, newest first."""
+    conn = db.connect(str(DB_PATH))
+    try:
+        return {
+            "stats": db.application_stats(conn),
+            "applications": [{**dict(r), "url": safe_url(r["url"] or "")} for r in db.applications(conn)],
+        }
     finally:
         conn.close()
 
@@ -140,6 +174,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, PAGE.encode("utf-8"), "text/html; charset=utf-8")
         if path == "/api/reports":
             return self._json(200, report_names())
+        if path == "/api/tracker":
+            return self._json(200, load_tracker())
         if path.startswith("/api/report/"):
             data = load_report(path[len("/api/report/"):])
             return self._json(200, data) if data else self._json(404, {"error": "no such report"})
@@ -149,16 +185,25 @@ class Handler(BaseHTTPRequestHandler):
         if not self._host_ok():
             return self._json(403, {"error": "bad host"})
         # Requiring JSON means a web page on another origin can't send this without a CORS preflight, which we never grant.
-        if urlparse(self.path).path != "/api/mark" or "application/json" not in (self.headers.get("Content-Type") or ""):
+        path = urlparse(self.path).path
+        if path not in ("/api/mark", "/api/applied-date") or "application/json" not in (self.headers.get("Content-Type") or ""):
             return self._json(400, {"error": "bad request"})
         try:
             body = json.loads(self.rfile.read(min(int(self.headers.get("Content-Length") or 0), 10_000)))
-            job_id, status = str(body["id"]), str(body["status"])
+            job_id = str(body["id"])
+            if path == "/api/mark":
+                status = str(body["status"])
+            else:
+                day = parse_day(body["date"])
         except (ValueError, KeyError, TypeError):
             return self._json(400, {"error": "bad request"})
+        if path == "/api/applied-date":
+            if day is None:
+                return self._json(400, {"error": "date must be a real day, YYYY-MM-DD, not in the future"})
+            return self._json(200, {"updated": set_applied_date(job_id, day)})
         if status not in STATUSES:
             return self._json(400, {"error": "bad status"})
-        self._json(200, {"updated": mark_status(job_id, status)})
+        self._json(200, mark_status(job_id, status))
 
 
 PAGE = r"""<!doctype html>
@@ -193,14 +238,37 @@ h2{font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--mute
 .verdict.apply{color:var(--good)}.verdict.maybe{color:var(--warn)}.verdict.skip{color:var(--bad)}
 #desc{white-space:pre-wrap;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:16px;overflow-wrap:anywhere}
 .empty{color:var(--mute);text-align:center;margin-top:20vh}
+.tabs{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.tab{padding:7px 10px;border:1px solid var(--line);border-radius:6px;text-align:center;text-decoration:none;color:var(--ink);font-weight:600}
+.tab.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn.apply{background:var(--good);border-color:var(--good);color:#fff;font-weight:600}
+.btn.apply:hover{filter:brightness(1.1)}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin:14px 0 8px}
+.stat{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px}
+.stat .k{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--mute)}
+.stat .n{font-size:38px;font-weight:700;line-height:1.1;margin:2px 0}
+.stat .d{color:var(--mute);font-size:13px}
+table{width:100%;border-collapse:collapse;background:var(--panel);border:1px solid var(--line);border-radius:8px;overflow:hidden}
+th{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--mute);text-align:left;padding:8px 10px;border-bottom:1px solid var(--line)}
+td{padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:middle}
+tr:last-child td{border-bottom:0}
+td select.status{padding:4px 6px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink);font:inherit}
+td select.s-interview{border-color:var(--accent)}td select.s-offer,td select.s-accepted{border-color:var(--good);color:var(--good);font-weight:600}
+td select.s-rejected{border-color:var(--bad);color:var(--bad)}td select.s-withdrawn{color:var(--mute)}
+td input[type=date]{padding:4px 6px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink);font:inherit}
+td a{color:var(--accent)}
+.muted{color:var(--mute)}
 @media (max-width:760px){body{flex-direction:column;height:auto}nav{width:auto;max-height:45vh}main{padding:16px}}
 </style></head><body>
-<nav><header><select id="report" aria-label="Report"></select><input id="q" placeholder="Filter by title or company" aria-label="Filter"></header><div id="list"></div></nav>
+<nav><header><div class="tabs"><a class="tab" id="tab-matches" href="#">Matches</a><a class="tab" id="tab-tracker" href="#tracker">Tracker <span id="tcount"></span></a></div><select id="report" aria-label="Report"></select><input id="q" placeholder="Filter by title or company" aria-label="Filter"></header><div id="list"></div></nav>
 <main id="main"><div class="empty">Select a job from the list.</div></main>
 <script>
 const $=s=>document.querySelector(s);
 const el=(tag,props={},...kids)=>{const e=document.createElement(tag);Object.assign(e,props);kids.forEach(k=>e.append(k));return e};
-let jobs=[],reportName="";
+let jobs=[],reportName="",tracker=null,lastJob="";
+const APPLIED=["applied","interview","offer","accepted","rejected","withdrawn"];
+const STATUS_LABEL={applied:"Applied",interview:"Interview",offer:"Offer received",accepted:"Offer accepted",rejected:"Rejected",withdrawn:"Withdrawn"};
+const fmt=(iso,opts)=>new Date(iso+"T00:00:00").toLocaleDateString(undefined,opts);
 
 async function api(path,opts){const r=await fetch(path,opts);if(!r.ok)throw new Error(path+" "+r.status);return r.json()}
 
@@ -220,9 +288,9 @@ function renderList(){
   const q=$("#q").value.toLowerCase();
   const items=jobs.filter(j=>(j.title+" "+j.company).toLowerCase().includes(q)).map(j=>{
     const tier=j.score>=80?"hi":j.score>=60?"mid":"";
-    const a=el("a",{className:"item"+(["applied","skipped","rejected"].includes(j.status)?" done":""),href:"#"+encodeURIComponent(j.id)},
+    const a=el("a",{className:"item"+(["applied","skipped","rejected","withdrawn"].includes(j.status)?" done":""),href:"#"+encodeURIComponent(j.id)},
       el("div",{className:"score "+tier,textContent:j.score}),
-      el("div",{},el("div",{className:"t",textContent:j.title}),el("div",{className:"c",textContent:j.company+" · "+(j.location||"")})));
+      el("div",{},el("div",{className:"t",textContent:j.title}),el("div",{className:"c",textContent:j.company+" · "+(j.location||"")+(j.applied_at?" · ✓ applied":"")})));
     a.dataset.id=j.id;return a});
   $("#list").replaceChildren(...items);markSelected();
 }
@@ -237,12 +305,23 @@ function list(title,items,cls){
 }
 function route(){
   const id=decodeURIComponent(location.hash.slice(1));
+  const inTracker=id==="tracker";
+  $("#tab-tracker").classList.toggle("on",inTracker);$("#tab-matches").classList.toggle("on",!inTracker);
+  if(inTracker){markSelected();renderTracker();return}
   const j=jobs.find(x=>x.id===id);markSelected();
+  if(j)lastJob=id;
   if(!j){$("#main").replaceChildren(el("div",{className:"empty",textContent:jobs.length?"Select a job from the list.":"No jobs in this report."}));return}
   const meta=[j.location,j.pay&&j.pay!=="n/a - n/a"?j.pay:"",j.posted&&"Posted "+j.posted].filter(Boolean).join("  ·  ");
   const buttons=el("div",{className:"row"});
   if(j.url)buttons.append(el("a",{className:"btn primary",href:j.url,target:"_blank",rel:"noopener noreferrer",textContent:"Open original posting"}));
-  ["saved","applied","skipped","interview"].forEach(s=>buttons.append(el("button",{className:"btn"+(j.status===s?" on":""),textContent:s,onclick:()=>setStatus(j,s)})));
+  const tracked=APPLIED.includes(j.status)&&j.applied_at;
+  if(tracked){
+    buttons.append(el("span",{className:"btn on",textContent:"✓ Applied "+fmt(j.applied_at,{month:"short",day:"numeric",year:"numeric"})}),
+      el("button",{className:"btn",textContent:"Undo",title:"Remove from the tracker",onclick:()=>setStatus(j,"new",true)}));
+  }else{
+    buttons.append(el("button",{className:"btn apply",textContent:"Mark as applied",title:"Adds this job to the tracker with today's date",onclick:()=>setStatus(j,"applied",true)}));
+  }
+  ["saved","skipped","interview"].forEach(s=>buttons.append(el("button",{className:"btn"+(j.status===s?" on":""),textContent:s,onclick:()=>setStatus(j,s)})));
   const card=el("div",{className:"card"},
     el("h1",{textContent:j.title}),el("p",{className:"sub",textContent:j.company+(meta?"  ·  "+meta:"")}),
     el("div",{},el("span",{className:"verdict "+(j.verdict||""),textContent:(j.verdict||"")+" "+j.score}),el("span",{textContent:j.reason||""})),
@@ -253,11 +332,65 @@ function route(){
     el("div",{id:"desc",textContent:j.description||"No stored description. Use the button above to read the original posting."}));
   $("#main").replaceChildren(card);$("#main").scrollTop=0;
 }
-async function setStatus(j,status){
+const post=(path,body)=>api(path,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+async function setStatus(j,status,explicit){
+  const tracked=APPLIED.includes(j.status)&&j.applied_at;
+  if(tracked&&!APPLIED.includes(status)&&!explicit&&!confirm("This job is in your tracker. Marking it \""+status+"\" removes it from the tracker. Continue?"))return;
   try{
-    await api("/api/mark",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({id:j.id,status})});
-    j.status=status;renderList();route();
+    const res=await post("/api/mark",{id:j.id,status});
+    j.status=status;j.applied_at=res.applied_at;renderList();route();refreshTracker();
   }catch(e){alert("Could not update status: "+e.message)}
+}
+async function reloadJobs(){if(reportName)await openReport(reportName)}
+async function refreshTracker(){
+  try{
+    tracker=await api("/api/tracker");
+    const n=tracker.stats.all.applications;$("#tcount").textContent=n?"("+n+")":"";
+    if(location.hash==="#tracker")renderTracker();
+  }catch(e){}
+}
+function stat(label,s,detail){
+  return el("div",{className:"stat"},el("div",{className:"k",textContent:label}),el("div",{className:"n",textContent:s.applications}),
+    el("div",{className:"d",textContent:detail+" · "+s.companies+(s.companies===1?" company":" companies")}));
+}
+function statusSelect(a){
+  const sel=el("select",{className:"status s-"+a.status,title:"Update where this application stands"},
+    ...APPLIED.map(s=>el("option",{value:s,textContent:STATUS_LABEL[s],selected:s===a.status})));
+  sel.onchange=async()=>{
+    try{await post("/api/mark",{id:a.id,status:sel.value});await refreshTracker();await reloadJobs()}
+    catch(e){alert("Could not update the status: "+e.message);sel.value=a.status}
+  };
+  return sel;
+}
+function renderTracker(){
+  $("#tab-tracker").classList.add("on");$("#tab-matches").classList.remove("on");
+  if(!tracker){$("#main").replaceChildren(el("div",{className:"empty",textContent:"Loading..."}));refreshTracker();return}
+  const s=tracker.stats,short={weekday:"short",month:"short",day:"numeric"};
+  const rows=tracker.applications.map(a=>{
+    const date=el("input",{type:"date",value:a.applied_at,max:s.today,"aria-label":"Date applied"});
+    date.onchange=async()=>{
+      try{await post("/api/applied-date",{id:a.id,date:date.value});await refreshTracker();await reloadJobs()}
+      catch(e){alert("Could not change the date: "+e.message);await refreshTracker()}
+    };
+    const title=a.url?el("a",{href:a.url,target:"_blank",rel:"noopener noreferrer",textContent:a.title}):el("span",{textContent:a.title});
+    const remove=el("button",{className:"btn",textContent:"Remove",title:"Remove from the tracker",onclick:async()=>{
+      if(!confirm("Remove "+a.title+" at "+a.company+" from the tracker?"))return;
+      try{await post("/api/mark",{id:a.id,status:"new"});await refreshTracker();await reloadJobs()}
+      catch(e){alert("Could not remove it: "+e.message)}}});
+    return el("tr",{},el("td",{},date),el("td",{textContent:a.company}),el("td",{},title),el("td",{},statusSelect(a)),el("td",{},remove));
+  });
+  const table=rows.length
+    ?el("table",{},el("thead",{},el("tr",{},...["Date applied","Company","Role","Status",""].map(h=>el("th",{textContent:h})))),el("tbody",{},...rows))
+    :el("div",{className:"empty",style:"margin-top:8vh",textContent:"No applications yet. Open a job on the Matches tab and click “Mark as applied”."});
+  $("#main").replaceChildren(el("div",{className:"card"},
+    el("h1",{textContent:"Application tracker"}),
+    el("p",{className:"sub",textContent:"Counts include every job marked as applied, whatever happened next (interview, offer, rejection)."}),
+    el("div",{className:"stats"},
+      stat("This week",s.week,fmt(s.week.start,short)+" – "+fmt(s.week.end,short)),
+      stat("This month",s.month,s.month.label),
+      stat("All time",s.all,"since you started tracking")),
+    el("h2",{textContent:"Applications"}),table));
+  $("#main").scrollTop=0;
 }
 function step(d){
   const ids=[...document.querySelectorAll(".item")].map(a=>a.dataset.id);if(!ids.length)return;
@@ -268,6 +401,8 @@ addEventListener("hashchange",route);
 $("#q").addEventListener("input",renderList);
 addEventListener("keydown",e=>{if(e.target.matches("input,select")||e.ctrlKey||e.metaKey||e.altKey)return;
   if(e.key==="j")step(1);else if(e.key==="k")step(-1)});
+$("#tab-matches").addEventListener("click",e=>{e.preventDefault();location.hash=lastJob?"#"+encodeURIComponent(lastJob):"#"});
+refreshTracker();
 loadReports().catch(e=>{$("#main").replaceChildren(el("div",{className:"empty",textContent:"Could not load reports: "+e.message}))});
 </script></body></html>
 """

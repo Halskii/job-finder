@@ -1,16 +1,18 @@
-.venv/
+# Secrets and personal data: never commit these
 .env
-jobs.db
-reports/
-__pycache__/
-*.pyc
-resume.txt
-resume/
-resume.pdf
+config.yaml
 profile.json
 profile.json.bak
-config.yaml
-test_exclusions.py
-config.yaml
-config.yaml
 discovered_sources.yaml
+resume.pdf
+resume.txt
+resume/
+
+# Generated data
+jobs.db
+reports/
+
+# Python
+.venv/
+__pycache__/
+*.pyc

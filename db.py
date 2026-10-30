@@ -5,6 +5,7 @@ import json
 import re
 import sqlite3
 import time
+from datetime import date, timedelta
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS jobs (
@@ -37,6 +38,8 @@ def _migrate(conn) -> None:
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(jobs)")}
     if "dedupe_key" not in cols:
         conn.execute("ALTER TABLE jobs ADD COLUMN dedupe_key TEXT")
+    if "applied_at" not in cols:   # the day you applied, as YYYY-MM-DD; NULL means not applied
+        conn.execute("ALTER TABLE jobs ADD COLUMN applied_at TEXT")
     for r in conn.execute("SELECT id, company, title FROM jobs WHERE dedupe_key IS NULL").fetchall():
         conn.execute("UPDATE jobs SET dedupe_key=? WHERE id=?", (dedupe_key(r["company"], r["title"]), r["id"]))
     conn.commit()
@@ -90,8 +93,72 @@ def top(conn, n: int, min_score: int):
     ).fetchall()
 
 
-def set_status(conn, id_part: str, status: str, note: str = "") -> int:
-    cur = conn.execute("UPDATE jobs SET status=?, notes=COALESCE(NULLIF(?, ''), notes) WHERE id LIKE ?",
-                       (status, note, f"%{id_part}%"))
+# Statuses that mean "I applied": a job that moves on to an interview, offer, or rejection was still applied to.
+APPLIED_STATUSES = ("applied", "interview", "offer", "accepted", "rejected", "withdrawn")
+
+
+def _update_status(conn, where: str, where_args: tuple, status: str, note: str, today: date | None) -> int:
+    """Set the status and keep applied_at consistent with it. Moving to an applied-type status records today
+    unless a date is already stored; moving to any other status (new, saved, skipped) clears the date, which
+    removes the job from the application tracker."""
+    if status in APPLIED_STATUSES:
+        applied, extra = "COALESCE(applied_at, ?)", ((today or date.today()).isoformat(),)
+    else:
+        applied, extra = "NULL", ()
+    cur = conn.execute(
+        f"UPDATE jobs SET status=?, notes=COALESCE(NULLIF(?, ''), notes), applied_at={applied} WHERE {where}",
+        (status, note, *extra, *where_args))
     conn.commit()
     return cur.rowcount
+
+
+def set_status(conn, id_part: str, status: str, note: str = "", today: date | None = None) -> int:
+    """Update every job whose id contains `id_part` (used by `main.py mark`)."""
+    return _update_status(conn, "id LIKE ?", (f"%{id_part}%",), status, note, today)
+
+
+def set_status_exact(conn, job_id: str, status: str, note: str = "", today: date | None = None) -> int:
+    """Update the one job with exactly this id (used by the web viewer)."""
+    return _update_status(conn, "id = ?", (job_id,), status, note, today)
+
+
+def set_applied_date(conn, job_id: str, day: date) -> int:
+    """Change the date of an application that is already in the tracker. Does nothing for a job that is not."""
+    cur = conn.execute("UPDATE jobs SET applied_at=? WHERE id=? AND applied_at IS NOT NULL", (day.isoformat(), job_id))
+    conn.commit()
+    return cur.rowcount
+
+
+def applications(conn) -> list:
+    """Everything in the tracker, newest application first."""
+    return conn.execute(
+        "SELECT id, company, title, location, url, status, notes, applied_at FROM jobs WHERE applied_at IS NOT NULL"
+        " ORDER BY applied_at DESC, first_seen DESC").fetchall()
+
+
+def application_stats(conn, today: date | None = None) -> dict:
+    """Counts of applications for the current week (Monday through Sunday), the current calendar month, and all time.
+    'applications' counts every tracked job; 'companies' counts distinct companies among them."""
+    today = today or date.today()
+    week_start = today - timedelta(days=today.weekday())          # weekday(): Monday is 0
+    week_end = week_start + timedelta(days=6)                      # Sunday
+    month_start = today.replace(day=1)
+    next_month = (month_start + timedelta(days=32)).replace(day=1)
+
+    def count(lo: date | None = None, hi: date | None = None) -> dict:
+        """Applications dated lo <= day < hi."""
+        sql = "SELECT COUNT(*) AS n, COUNT(DISTINCT lower(company)) AS c FROM jobs WHERE applied_at IS NOT NULL"
+        args: list = []
+        if lo:
+            sql, args = sql + " AND applied_at >= ?", args + [lo.isoformat()]
+        if hi:
+            sql, args = sql + " AND applied_at < ?", args + [hi.isoformat()]
+        r = conn.execute(sql, args).fetchone()
+        return {"applications": r["n"], "companies": r["c"]}
+
+    return {
+        "today": today.isoformat(),
+        "week": {"start": week_start.isoformat(), "end": week_end.isoformat(), **count(week_start, week_end + timedelta(days=1))},
+        "month": {"label": month_start.strftime("%B %Y"), **count(month_start, next_month)},
+        "all": count(),
+    }
