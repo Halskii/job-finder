@@ -40,12 +40,44 @@ You can call the virtual environment's Python directly without activating it, fo
 | `python main.py run --limit 10` | Full run, but score at most 10 jobs |
 | `python main.py list --top 15` | Best scored jobs from the database |
 | `python main.py mark <id> applied "note"` | Update the tracker. `<id>` can be any unique fragment of a job id |
+| `python main.py discover Stripe "Palo Alto Networks"` | Look for those companies' job boards (see "Adding more boards"). Add `--add` to save what it finds, or `--file companies.txt` for a list |
+| `python main.py workday-add <careers URL>` | Add a Workday careers site from any page address on it |
+| `python viewer.py` | Open the report viewer in your browser (see below) |
 | `python inspect_db.py` | Peek at what is stored |
 | `python -m unittest -v` | Run the offline tests (no network, no API key) |
 
 Statuses: `new, saved, applied, skipped, interview, rejected, offer`. Jobs you mark are excluded from future reports.
 
 Typical first run: `profile` (review the diff, answer `y`), then `run`, then read the newest file in `reports/`.
+
+## Adding more boards
+
+Postings come from public job-board data that companies publish themselves: **Greenhouse, Lever, Ashby, SmartRecruiters, and Workday**, plus the **Remotive** remote-jobs feed and two government sources (below). The more companies you add, the more postings are searched.
+
+- **`discover`** guesses a company's board address from its name and tries Greenhouse, Lever, Ashby, and SmartRecruiters. For each one it finds, it shows how many postings the board has, how many match your title, location, and pay filters, and one example posting with its link. **Check the example is the company you meant**, since a short name can match someone else's board. Nothing is saved until you run it again with `--add`. A name it can't find is usually a company on Workday or its own system, or one whose board name differs from its brand: for SmartRecruiters you can pass the exact id, for example `discover BoschGroup`.
+- **`workday-add`**: open the company's careers page, click any job, copy the address from the browser bar, and run `python main.py workday-add "<address>"`. It reads the host, tenant, and site out of the address, confirms the site responds, and saves it. Use `--name "Company"` for a nicer label.
+- Boards added this way are stored in `discovered_sources.yaml` and merged with `sources` in `config.yaml` each run, so `config.yaml` and its comments are never rewritten. You can also add slugs to `config.yaml` by hand, including a `smartrecruiters:` list (`jobs.smartrecruiters.com/<CompanyId>`, not case sensitive).
+- **Remotive** (`feeds.remotive` in `config.yaml`): remote jobs, limited to the categories you list. Its terms ask for no more than about four requests a day, so it is fetched at most once every `min_hours` (default 6) no matter how often you run the program. Its job links go to remotive.com, as its terms require.
+- **Duplicates:** if the same company and title is already stored from a different source, for example a job on both a company's board and Remotive, the second copy is skipped (shown as `duplicates` in the run summary). The same title in two different cities from one source is kept, because those are separate postings.
+- Not included: Adzuna (needs a free key), Oracle and iCIMS career sites (no clean public data), and Workable (its old public endpoint now returns nothing).
+
+### Government jobs (on by default)
+
+Both are under `government:` in `config.yaml`; set `enabled: false` on one to turn it off.
+
+- **Federal (USAJobs)**: the official API. It needs a free key, so until you add one the run prints a "skipped" line and carries on. Request a key at https://developer.usajobs.gov/apirequest, then put `USAJOBS_API_KEY` and `USAJOBS_EMAIL` (the email the key was issued to) in `.env`. `keywords` sets what is searched. This part has been tested only against the API's documented format, not live, because that needs a key; if the first run with your key shows an error, tell me what it says.
+- **Texas HHS (HHSC, DFPS, DSHS)** at careers.hhs.texas.gov: the site has no API, so the program reads the same public search and job pages any visitor sees (one request at a time, a few pages per search word). The site's `robots.txt` allows this and its pages state no rule against it. This is the most fragile source: if the site changes its layout the run prints "no postings found" instead of failing. Monthly salaries are converted to a yearly figure so the `min_pay` filter works.
+- **Government titles**: these postings are titled differently from tech companies ("Programmer III", "IT Specialist (APPSW)"). `gov_titles` in `config.yaml` adds extra titles that apply **only to government sources**; the seniority exclusions (senior, lead, manager, ...) still apply.
+- **Left out on purpose**: WorkInTexas.com and governmentjobs.com (the NEOGOV site many cities and counties use), because their `robots.txt` tells automated programs not to crawl them. For a city, county, or agency on Workday, use `workday-add`; for one on Greenhouse, Lever, or similar, use `discover`.
+
+## Viewing matches in the browser
+
+`python viewer.py` starts a small local server (`http://127.0.0.1:8765/`, your machine only) and opens it. It reads the Markdown files in `reports/`, so the list in the sidebar is exactly what the report says, and joins each entry to the stored posting in `jobs.db` by its `ID` line.
+
+- Sidebar: pick a report date, filter by title or company, click a job (or press `j` / `k` to move). Each job has its own address (`#id`), so back and forward work.
+- Detail pane: score, verdict, matched and missing skills, resume angle, and the full stored posting text. **Open original posting** opens the real page in a new tab. Job sites generally forbid embedding their pages in another page, so the posting is shown from the saved copy instead.
+- Buttons `saved`, `applied`, `skipped`, `interview` update the tracker, same as `main.py mark`. Applied and skipped jobs drop out of future reports.
+- Options: `--port 8765`, `--no-open`. Stop it with Ctrl+C.
 
 ## Your profile and resume
 
@@ -56,6 +88,7 @@ Typical first run: `profile` (review the diff, answer `y`), then `run`, then rea
 ## Configuration (`config.yaml`)
 
 - `min_pay`, `max_age_days`, `us_only`, `request_delay`
+- `exclude_locations`: places to drop (California and its major cities are pre-filled). A posting is dropped only if **every** location it lists matches, so "San Francisco, CA | Remote - US" is kept because the remote option is still open to you. Matching is whole-word and case-insensitive, except two-letter state codes, which must be capitalized (`CA`). Add or remove entries freely, or delete the list to turn it off. Check what's stored with `python inspect_db.py --where "california"`.
 - `titles`: your title list (from `filter.txt`), and `exclude_title_words`
 - `scoring`: `model`, `max_per_run` (cost cap), `report_min_score`, `report_size`
 - `profile_model`: the model used by `main.py profile`
@@ -68,11 +101,14 @@ Typical first run: `profile` (review the diff, answer `y`), then `run`, then rea
 | File | Purpose |
 |---|---|
 | `main.py` | Command-line entry point and pipeline |
-| `sources.py` | Job-board fetchers (Greenhouse, Lever, Ashby, Workday) and pay parsing |
+| `sources.py` | Job-board fetchers (Greenhouse, Lever, Ashby, SmartRecruiters, Workday, Remotive) and pay parsing |
+| `gov_sources.py` | Government sources: USAJobs (federal API) and Texas HHS careers |
+| `discovery.py` | Board discovery from company names, Workday address parsing, and merging `discovered_sources.yaml` |
 | `filters.py` | Title, location, pay, and age filters, plus the keyword pre-score |
 | `scorer.py` | Claude fit scoring |
 | `profile_gen.py` | Builds `profile.json` from the resume |
 | `db.py` | SQLite storage, dedupe, and tracker |
+| `viewer.py` | Local web viewer for the reports |
 | `config.yaml`, `profile.json` | Your settings and verified facts |
 | `test_*.py` | Offline tests |
 | `.env` | Your API key (git-ignored; never commit it) |

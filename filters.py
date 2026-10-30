@@ -16,6 +16,7 @@ NON_US_HINTS = [
     "copenhagen", "norway", "oslo", "finland", "helsinki", "czech", "prague", "ukraine", "kyiv", "hungary", "budapest",
     "greece", "athens", "egypt", "cairo", "nigeria", "lagos", "kenya", "nairobi", "south africa", "cape town", "pakistan",
     "bangladesh", "sri lanka", "hong kong", "ontario", "quebec", "british columbia", "montreal", "ottawa", "calgary",
+    "europe", "asia", "africa", "latin america", "middle east",
 ]
 US_HINTS = ["united states", "usa", "u.s.", ", us", "remote - us", "us-remote", "us remote"]
 US_STATE_RE = re.compile(r",\s*(A[LKZR]|C[AOT]|D[EC]|F[L]|G[A]|H[I]|I[ADLN]|K[SY]|L[A]|M[ADEINOST]|N[CDEHJMVY]|O[HKR]|P[AR]|R[I]|S[CD]|T[NX]|U[T]|V[AT]|W[AIVY])\b")
@@ -56,6 +57,31 @@ def location_ok(location: str, us_only: bool) -> bool:
     if any(h in loc for h in US_HINTS) or US_STATE_RE.search(location or ""):
         return True
     return not any(re.search(r"(?<![a-z])" + re.escape(h) + r"(?![a-z])", loc) for h in NON_US_HINTS)
+
+
+def compile_exclusions(terms: list[str]) -> list[re.Pattern]:
+    """Whole-word, case-insensitive patterns. Two-letter terms like 'CA' are case-sensitive so 'ca' in a word never matches."""
+    out = []
+    for t in terms or []:
+        t = t.strip()
+        if not t:
+            continue
+        flags = 0 if (len(t) == 2 and t.isupper()) else re.I
+        out.append(re.compile(r"(?<![A-Za-z])" + re.escape(t) + r"(?![A-Za-z])", flags))
+    return out
+
+
+def exclusion_ok(location: str, patterns: list[re.Pattern]) -> bool:
+    """False only when EVERY location listed for the posting is excluded.
+    'San Francisco, CA | Remote - US' stays (the remote option is still open to you); 'San Francisco, CA' is dropped."""
+    if not patterns or not (location or "").strip():
+        return True
+    # Split on ; | newline and the word 'or'. Also split on a comma that starts a "US-XXX" entry (Stripe-style
+    # "US-SF, US-NYC, US-Remote"). Other commas stay: "San Francisco, CA" is ONE location.
+    parts = [p.strip() for p in re.split(r"[;|\n]|\bor\b|,\s*(?=US-)", location) if p.strip()]
+    if not parts:
+        return True
+    return any(not any(p.search(part) for p in patterns) for part in parts)
 
 
 def pay_ok(pay_max: int | None, pay_min: int | None, minimum: int) -> bool:

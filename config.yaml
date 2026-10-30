@@ -6,7 +6,7 @@ us_only: true             # drop postings whose location looks outside the US
 request_delay: 0.4        # seconds between HTTP requests (be polite to job boards)
 
 profile_model: claude-sonnet-5-5   # used by `main.py profile` to read resume.pdf
-
+exclude_locations:
 scoring:
   model: claude-haiku-4-5-20251001   # cheap first pass; switch to claude-sonnet-5-5 for deeper analysis
   max_per_run: 40                    # cap LLM calls per run to control cost
@@ -113,6 +113,44 @@ sources:
   greenhouse: [anthropic, databricks, stripe, airbnb, cloudflare, datadog, gitlab, coinbase, figma, robinhood, samsara, twilio, okta, mongodb, elastic]
   lever: [palantir, spotify, plaid]
   ashby: [openai, ramp, notion, linear, vercel]
+  smartrecruiters: []      # smartrecruiters.com/<CompanyId> (the id is not case sensitive)
   workday:
     - {name: Vanguard, host: vanguard.wd5.myworkdayjobs.com, tenant: vanguard, site: vanguard_external}
     - {name: Alignment Health, host: alignmenthealthcare5.impl-wd12.myworkdayjobs.com, tenant: alignmenthealthcare5, site: ahc_external}
+
+# Aggregator feeds. Remotive (remote jobs) asks for at most ~4 requests a day, so it is fetched at most once per min_hours.
+# Its job links go to remotive.com, as their terms require. Categories: software-development, devops,
+# artificial-intelligence, engineering, information-technology, data, qa.
+feeds:
+  remotive:
+    enabled: true
+    min_hours: 6
+    categories: [software-development, devops, artificial-intelligence]
+
+# Government job titles, used only for government sources. They are titled differently from tech companies
+# (for example Texas 'Programmer III' or federal 'IT Specialist (APPSW)'). Level markers are optional.
+gov_titles:
+  - Programmer
+  - Programmer Analyst
+  - Java Developer
+  - Software Developer
+  - Application Developer
+  - Web Developer
+  - Developer
+  - IT Specialist
+  - Computer Scientist
+  - Computer Engineer
+
+# Government sources, on by default. Set enabled: false to turn one off.
+#  usajobs: the federal API. Needs a free key: add USAJOBS_API_KEY and USAJOBS_EMAIL (the email the key was issued to)
+#           to .env. Without them it is skipped with a note.
+#  texas_hhs: careers.hhs.texas.gov (HHSC, DFPS, DSHS). No API exists, so the public search pages are read.
+government:
+  usajobs:
+    enabled: true
+    keywords: [software developer, software engineer, IT specialist, programmer, devops, cloud engineer]
+    pages: 2
+  texas_hhs:
+    enabled: true
+    search_terms: [developer, programmer, software, engineer, devops]
+    pages: 2

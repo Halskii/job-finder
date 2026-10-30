@@ -9,3 +9,8 @@ resume/
 resume.pdf
 profile.json
 profile.json.bak
+config.yaml
+test_exclusions.py
+config.yaml
+config.yaml
+discovered_sources.yaml
