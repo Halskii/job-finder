@@ -1,0 +1,117 @@
+# job-finder configuration. Edit freely.
+
+min_pay: 80000            # annual USD. Postings with a KNOWN max below this are dropped; unknown pay is kept.
+max_age_days: 30          # drop postings older than this (when the posting date is known)
+us_only: true             # drop postings whose location looks outside the US
+request_delay: 0.4        # seconds between HTTP requests (be polite to job boards)
+
+profile_model: claude-sonnet-5-5   # used by `main.py profile` to read resume.pdf
+
+scoring:
+  model: claude-haiku-4-5-20251001   # cheap first pass; switch to claude-sonnet-5-5 for deeper analysis
+  max_per_run: 40                    # cap LLM calls per run to control cost
+  report_min_score: 60               # only show jobs scoring at least this in the report
+  report_size: 25
+
+# Titles from filter.txt. Level markers (I, II, III, Associate, Junior) are stripped automatically,
+# so "Software Engineer I" also matches a posting titled just "Software Engineer".
+titles:
+  - Associate Software Engineer
+  - Junior Software Engineer
+  - Software Engineer I
+  - Software Engineer II
+  - Software Engineer III
+  - Software Development Engineer I
+  - Software Development Engineer II
+  - Software Development Engineer III
+  - Associate AI Engineer
+  - AI Engineer I
+  - AI Engineer II
+  - AI Software Engineer
+  - AI Application Engineer
+  - AI Platform Engineer
+  - Generative AI Engineer
+  - Generative AI Software Engineer
+  - LLM Engineer
+  - LLM Application Engineer
+  - Agentic AI Engineer
+  - Applied AI Engineer
+  - AI Automation Engineer
+  - AI Integration Engineer
+  - Associate Machine Learning Engineer
+  - Machine Learning Engineer I
+  - Machine Learning Engineer II
+  - ML Platform Engineer
+  - MLOps Engineer
+  - Associate Backend Engineer
+  - Backend Software Engineer I
+  - Backend Software Engineer II
+  - Java Software Engineer
+  - Java Backend Developer
+  - Python Software Engineer
+  - Python Developer
+  - API Developer
+  - API Integration Engineer
+  - Associate Full Stack Developer
+  - Full Stack Software Engineer I
+  - Full Stack Software Engineer II
+  - Full Stack Developer
+  - Associate Platform Engineer
+  - Platform Engineer I
+  - Platform Engineer II
+  - Cloud Platform Engineer
+  - Cloud Software Engineer
+  - Associate Cloud Engineer
+  - Cloud Engineer I
+  - Cloud Engineer II
+  - Azure Cloud Engineer
+  - Cloud Infrastructure Engineer
+  - Infrastructure Engineer I
+  - Infrastructure Engineer II
+  - Infrastructure Automation Engineer
+  - Associate DevOps Engineer
+  - DevOps Engineer I
+  - DevOps Engineer II
+  - Cloud DevOps Engineer
+  - CI/CD Engineer
+  - Terraform Engineer
+  - Kubernetes Engineer
+  - Associate Site Reliability Engineer
+  - Site Reliability Engineer I
+  - Site Reliability Engineer II
+  - Enterprise Software Engineer
+  - Enterprise Application Developer
+  - Application Developer I
+  - Application Developer II
+  - Application Engineer
+  - Systems Integration Engineer
+  - Enterprise Integration Engineer
+  - Business Automation Engineer
+  - Software Automation Engineer
+  - Technical Solutions Engineer
+  - Solutions Engineer
+  - Data Integration Engineer
+  - Databricks Developer
+  - Associate Data Engineer
+  - Data Engineer I
+  - Data Engineer II
+
+# Titles containing any of these words are dropped (you have ~3 years of experience).
+exclude_title_words: [senior, sr, staff, principal, lead, manager, director, head, vp, intern, internship, architect]
+
+# Search words used for Workday sites (they have a free-text title search).
+workday_search_terms: ["software engineer", "platform engineer", "devops", "cloud engineer", "ai engineer", "machine learning", "site reliability", "automation engineer"]
+workday_max_pages: 3
+
+# Job boards. Add any company that uses these systems:
+#   Greenhouse: boards.greenhouse.io/<slug> or job-boards.greenhouse.io/<slug>
+#   Lever:      jobs.lever.co/<slug>
+#   Ashby:      jobs.ashbyhq.com/<slug>
+# Slugs that don't exist are skipped with a warning.
+sources:
+  greenhouse: [anthropic, databricks, stripe, airbnb, cloudflare, datadog, gitlab, coinbase, figma, robinhood, samsara, twilio, okta, mongodb, elastic]
+  lever: [palantir, spotify, plaid]
+  ashby: [openai, ramp, notion, linear, vercel]
+  workday:
+    - {name: Vanguard, host: vanguard.wd5.myworkdayjobs.com, tenant: vanguard, site: vanguard_external}
+    - {name: Alignment Health, host: alignmenthealthcare5.impl-wd12.myworkdayjobs.com, tenant: alignmenthealthcare5, site: ahc_external}
