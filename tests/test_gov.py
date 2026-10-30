@@ -1,7 +1,7 @@
 """Offline tests for the government sources (USAJobs, Texas HHS) and their title handling. No network.
 
 The USAJobs response shape below follows the published API documentation; it has NOT been checked against the live
-API, because that needs a key. The Texas HHS fixture (test_data/hhs_search_tiles.html) is two real result tiles."""
+API, because that needs a key. The Texas HHS fixture (tests/data/hhs_search_tiles.html) is two real result tiles."""
 import os
 import unittest
 from pathlib import Path
@@ -12,7 +12,7 @@ import gov_sources as g
 import main
 import sources
 
-FIXTURE = Path(__file__).parent / "test_data" / "hhs_search_tiles.html"
+FIXTURE = Path(__file__).parent / "data" / "hhs_search_tiles.html"
 
 USAJOBS_PAGE = {"SearchResult": {"SearchResultCount": 2, "SearchResultItems": [
     {"MatchedObjectId": "800001", "MatchedObjectDescriptor": {
@@ -201,9 +201,9 @@ class GovTitleTests(unittest.TestCase):
         for title in ("Caseworker II", "Nurse Practitioner", "Data Analyst V"):
             self.assertFalse(filters.title_ok(title, self.GOV, self.EXCLUDE), title)
 
-    def test_the_real_config_has_government_titles_and_sources_on(self):
+    def test_the_example_config_has_government_titles_and_sources_on(self):
         import yaml
-        cfg = yaml.safe_load((Path(__file__).parent / "config.yaml").read_text(encoding="utf-8"))
+        cfg = yaml.safe_load((Path(__file__).parent.parent / "config.example.yaml").read_text(encoding="utf-8"))
         self.assertIn("Programmer", cfg["gov_titles"])
         self.assertTrue(cfg["government"]["usajobs"]["enabled"])
         self.assertTrue(cfg["government"]["texas_hhs"]["enabled"])

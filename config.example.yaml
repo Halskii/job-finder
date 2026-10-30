@@ -1,0 +1,101 @@
+# job-finder configuration template.
+# Copy this file to config.yaml (which is git-ignored, so your settings stay private) and edit it.
+
+min_pay: 0                # annual USD. Postings with a KNOWN max below this are dropped; unknown pay is kept. 0 turns the filter off.
+max_age_days: 30          # drop postings older than this (when the posting date is known)
+us_only: true             # drop postings whose location looks outside the US
+
+# Locations to exclude. A posting is dropped only if EVERY location it lists matches, so
+# "Denver, CO | Remote - US" is kept (you could still take the remote option).
+# Whole-word, case-insensitive; two-letter state codes must be capitalized. Leave the list empty to turn this off.
+exclude_locations: []
+#  - Florida
+#  - FL
+request_delay: 0.4        # seconds between HTTP requests (be polite to job boards)
+
+profile_model: claude-sonnet-5-5   # used by `main.py profile` to read resume.pdf
+
+scoring:
+  model: claude-haiku-4-5-20251001   # cheap first pass; switch to claude-sonnet-5-5 for deeper analysis
+  max_per_run: 40                    # cap LLM calls per run to control cost
+  report_min_score: 60               # only show jobs scoring at least this in the report
+  report_size: 25
+  price_per_million_tokens: {input: 1.0, output: 5.0}   # USD for the scoring model above; edit if prices change
+
+# Job titles to look for. Level markers (I, II, III, Associate, Junior) are stripped automatically,
+# so "Software Engineer I" also matches a posting titled just "Software Engineer". Replace these with your own.
+titles:
+  - Software Engineer I
+  - Software Engineer II
+  - Associate Software Engineer
+  - Junior Software Engineer
+  - Backend Software Engineer
+  - Full Stack Software Engineer
+  - Platform Engineer
+  - Cloud Engineer
+  - DevOps Engineer
+  - Site Reliability Engineer
+  - Data Engineer
+  - Machine Learning Engineer
+  - AI Engineer
+  - Application Developer
+
+# Titles containing any of these words are dropped (adjust to your experience level).
+exclude_title_words: [senior, sr, staff, principal, lead, manager, director, head, vp, intern, internship, architect]
+
+# Search words used for Workday sites (they have a free-text title search).
+workday_search_terms: ["software engineer", "platform engineer", "devops", "cloud engineer", "ai engineer", "machine learning", "site reliability", "automation engineer"]
+workday_max_pages: 3
+
+# Job boards. Add any company that uses these systems (or let `main.py discover` / `main.py workday-add` do it for you):
+#   Greenhouse:      boards.greenhouse.io/<slug> or job-boards.greenhouse.io/<slug>
+#   Lever:           jobs.lever.co/<slug>
+#   Ashby:           jobs.ashbyhq.com/<slug>
+#   SmartRecruiters: jobs.smartrecruiters.com/<CompanyId>
+#   Workday:         https://<host>/en-US/<site>/...   ->  {name, host, tenant, site}
+# Slugs that don't exist are skipped with a warning.
+sources:
+  greenhouse: [anthropic, databricks, stripe, airbnb, cloudflare, datadog, gitlab, coinbase, figma, robinhood, samsara, twilio, okta, mongodb, elastic]
+  lever: [palantir, spotify]
+  ashby: [openai, ramp, notion, linear, vercel]
+  smartrecruiters: []
+  workday: []
+  # Example Workday entry:
+  #  - {name: Vanguard, host: vanguard.wd5.myworkdayjobs.com, tenant: vanguard, site: vanguard_external}
+
+# Aggregator feeds. Remotive (remote jobs) asks for at most ~4 requests a day, so it is fetched at most once per min_hours.
+# Its job links go to remotive.com, as their terms require. Categories: software-development, devops,
+# artificial-intelligence, engineering, information-technology, data, qa.
+feeds:
+  remotive:
+    enabled: true
+    min_hours: 6
+    categories: [software-development, devops, artificial-intelligence]
+
+# Government job titles, used only for government sources. They are titled differently from tech companies
+# (for example Texas 'Programmer III' or federal 'IT Specialist (APPSW)'). Level markers are optional.
+gov_titles:
+  - Programmer
+  - Programmer Analyst
+  - Java Developer
+  - Software Developer
+  - Application Developer
+  - Web Developer
+  - Developer
+  - IT Specialist
+  - Computer Scientist
+  - Computer Engineer
+
+# Government sources, on by default. Set enabled: false to turn one off.
+#  usajobs: the federal API. Needs a free key: add USAJOBS_API_KEY and USAJOBS_EMAIL (the email the key was issued to)
+#           to .env. Without them it is skipped with a note.
+#  texas_hhs: careers.hhs.texas.gov (HHSC, DFPS, DSHS). No API exists, so the public search pages are read.
+government:
+  usajobs:
+    enabled: true
+    keywords: [software developer, software engineer, IT specialist, programmer, devops, cloud engineer]
+    pages: 2
+  texas_hhs:
+    enabled: true
+    search_terms: [developer, programmer, software, engineer, devops]
+    pages: 2

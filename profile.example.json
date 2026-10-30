@@ -1,0 +1,29 @@
+{
+  "name": "Your Name",
+  "headline": "Software Engineer, 3 years at Example Corp: backend services, cloud infrastructure, and CI/CD",
+  "years_experience": 3,
+  "education": "B.S. Computer Science, Example State University",
+  "location": "Your City, ST",
+  "work_authorization": "U.S. citizen",
+  "security_clearance": "None. Willing to obtain one.",
+  "relocation": "Open to relocating for a strong offer",
+  "certifications": [
+    "Example Certification (in progress)"
+  ],
+  "strong_skills": [
+    "Python", "SQL", "REST APIs", "Docker", "Git", "CI/CD"
+  ],
+  "familiar_skills": [
+    "Kubernetes", "Terraform"
+  ],
+  "do_not_assume": [
+    "Go", "Kafka", "Spark", "a held security clearance", "5+ years of experience"
+  ],
+  "achievements": [
+    "Describe one concrete thing you built or improved, in a sentence, using only facts you can back up"
+  ],
+  "best_fit_notes": [
+    "Strongest matches: the kinds of roles you most want.",
+    "Weaker matches: roles that need skills you do not have."
+  ]
+}

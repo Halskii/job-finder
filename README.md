@@ -26,12 +26,17 @@ Rules baked into the scorer: only facts in your profile count as true, anything 
 ## Setup (Windows)
 
 ```powershell
-cd C:\Users\James\Documents\GitHub\job-finder
+git clone https://github.com/Halskii/job-finder.git
+cd job-finder
 python -m venv .venv
 .venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-copy .env.example .env      # then paste your key after ANTHROPIC_API_KEY=
+copy .env.example .env                    # then paste your key after ANTHROPIC_API_KEY=
+copy config.example.yaml config.yaml      # your settings: titles, pay floor, locations, companies
+copy profile.example.json profile.json    # your facts; edit it, then run `python main.py profile`
 ```
+
+`config.yaml`, `profile.json`, and `.env` are git-ignored, so your personal settings never get committed; the `*.example.*` files are the shared templates. Without them the program stops with a message saying which file to copy.
 
 Put your resume in the project folder as `resume.pdf` (a `resume.txt` or `resume.md` also works; the PDF is preferred if several exist). Use your most general resume, not a tailored one.
 
@@ -124,7 +129,7 @@ How it works:
 ## Your profile and resume
 
 - **`profile.json`** is the source of truth: `strong_skills`, `familiar_skills`, `do_not_assume`, achievements, citizenship, clearance status, relocation, and fit notes. Keep it accurate. Update it when something changes, for example after passing the AWS exam.
-- **`resume.pdf`** is sent to the scorer as extra context. Your email, phone, LinkedIn, and GitHub lines are removed first. If the resume and the profile disagree, the profile wins.
+- **`resume.pdf`** is sent to the scorer as extra context. Lines with your email, phone number, LinkedIn, or GitHub link are removed first. If the resume and the profile disagree, the profile wins.
 - **`main.py profile`** rebuilds the resume-derived fields from the PDF. It carries over what a resume can't express (citizenship, clearance, relocation, location, `do_not_assume`, fit notes). A skill that is on the resume but also in `do_not_assume` is left out and reported as a conflict, so nothing gets promoted by accident. If it is now true, remove it from `do_not_assume` and run the command again. The previous file is saved as `profile.json.bak`. Read the diff before accepting: the model can misjudge strong versus familiar.
 
 ## Configuration (`config.yaml`)
@@ -156,16 +161,16 @@ How it works:
 | `db.py` | SQLite storage, cross-source de-duplication, job statuses, and the application tracker (dates and week / month / all-time counts) |
 | `viewer.py` | Local web viewer for the reports and the application tracker |
 | `inspect_db.py` | Quick look at what is stored |
-| `config.yaml`, `profile.json` | Your settings and verified facts |
-| `discovered_sources.yaml` | Boards added by `discover --add` and `workday-add` (created on first use) |
-| `jobs.db`, `reports/` | Stored postings, scores, and the tracker; daily Markdown reports |
-| `test_*.py`, `test_data/` | Offline tests and the saved page sample they use |
-| `.env`, `.env.example` | Your keys (git-ignored; never commit them) and a template |
+| `config.example.yaml`, `profile.example.json`, `.env.example` | Templates to copy (see Setup) |
+| `config.yaml`, `profile.json`, `.env` | Your own settings, verified facts, and keys. Git-ignored; never commit them |
+| `discovered_sources.yaml` | Boards added by `discover --add` and `workday-add` (created on first use, git-ignored) |
+| `jobs.db`, `reports/` | Stored postings, scores, and the tracker; daily Markdown reports (git-ignored) |
+| `tests/` | Offline tests (`tests/data/` holds a saved page sample). Run with `python -m unittest` |
 
 ## Notes
 
 - Cost: the pre-score picks which jobs go to Claude first, and `scoring.max_per_run` caps API calls per run. Each full run prints the tokens used and an estimated cost; check your usage on Anthropic's dashboard too.
-- Privacy: `.env`, `jobs.db`, `reports/`, `config.yaml`, `profile.json`, `discovered_sources.yaml`, and your resume files are git-ignored. The resume's contact lines are stripped before any API call. The viewer listens only on your own computer and ignores requests addressed to any other host name.
+- Privacy: `.env`, `jobs.db`, `reports/`, `config.yaml`, `profile.json`, `discovered_sources.yaml`, and your resume files are git-ignored. Resume lines containing an email, a LinkedIn or GitHub link, or a phone number are stripped before any API call. The viewer listens only on your own computer and ignores requests addressed to any other host name.
 - Be polite: requests are spaced by `request_delay`. Use this only for your own job search and respect each site's terms.
 - Not included on purpose: LinkedIn and Indeed scraping (against their terms and brittle), WorkInTexas and governmentjobs.com (their `robots.txt` asks automated programs to stay out), and auto-submitting applications.
 - Known limits: only companies on the supported boards are covered. Workday, SmartRecruiters, and Texas HHS postings need one extra request each for the full text, made only for title matches that are not stored yet (so ones rejected for age or pay are looked up again on later runs). The USAJobs source has not been run against the live API. The Texas HHS source depends on that site's page layout.

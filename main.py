@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import time
 from datetime import date
@@ -52,6 +53,10 @@ def read_resume_file() -> str:
     return ""
 
 
+# A phone number such as (555) 123-4567, 555-123-4567, or 555.123.4567. Ordinary numbers like 100,000 or 2018 do not match.
+PHONE_RE = re.compile(r"(?<!\d)(?:\+?1[-. ]?)?\(?\d{3}\)?[-. ]?\d{3}[-. ]\d{4}(?!\d)")
+
+
 def load_resume() -> str:
     """Load the resume. Contact lines (email, phone, links) are removed before anything is sent to the API."""
     raw = read_resume_file()
@@ -60,7 +65,7 @@ def load_resume() -> str:
     keep = []
     for line in raw.splitlines():
         low = line.lower()
-        if "@" in low or "linkedin.com" in low or "github.com" in low:
+        if "@" in low or "linkedin.com" in low or "github.com" in low or PHONE_RE.search(line):
             continue
         keep.append(line)
     return "\n".join(keep).strip()
@@ -405,6 +410,11 @@ def main() -> None:
     w.add_argument("--name", help="label to show for the company")
     args = ap.parse_args()
 
+    if not (ROOT / "config.yaml").exists():
+        sys.exit("config.yaml not found. Copy config.example.yaml to config.yaml, then edit it (see the README).")
+    if not (ROOT / "profile.json").exists():
+        sys.exit("profile.json not found. Copy profile.example.json to profile.json and fill in the facts a resume can't "
+                 "show (citizenship, clearance, do_not_assume), then run: python main.py profile")
     cfg = discovery.load_config(ROOT)
     profile = json.loads((ROOT / "profile.json").read_text(encoding="utf-8"))
     conn = db.connect(str(ROOT / "jobs.db"))
