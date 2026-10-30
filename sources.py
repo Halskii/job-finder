@@ -7,9 +7,10 @@ from __future__ import annotations
 
 import html
 import re
+import threading
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import requests
 
@@ -61,8 +62,20 @@ def extract_pay(text: str) -> tuple[int | None, int | None]:
     return None, None
 
 
+_local = threading.local()
+
+
+def _session() -> requests.Session:
+    """One HTTP session per thread. It keeps the connection to a server open, so the next request to the same server skips
+    the connection and TLS handshake (a large share of the time for a small JSON request)."""
+    if not hasattr(_local, "session"):
+        _local.session = requests.Session()
+        _local.session.headers.update(UA)
+    return _local.session
+
+
 def _get(url: str, **kw):
-    r = requests.get(url, headers=UA, timeout=TIMEOUT, **kw)
+    r = _session().get(url, timeout=TIMEOUT, **kw)
     r.raise_for_status()
     return r.json()
 
@@ -140,6 +153,24 @@ def fetch_ashby(slug: str) -> list[Job]:
 
 
 # ----------------------------------------------------------------------------- Workday
+def workday_posted(text: str, today: date | None = None) -> str | None:
+    """An approximate ISO date from the list's 'Posted 5 Days Ago' / 'Posted Today' / 'Posted 30+ Days Ago'. It lets old postings
+    be dropped before their full text is fetched. 'Posted 30+' becomes 31 days ago: older than a 30-day limit, but not
+    claiming to know how old. The exact date from the full posting replaces this one."""
+    today = today or date.today()
+    t = (text or "").lower()
+    if "today" in t:
+        days = 0
+    elif "yesterday" in t:
+        days = 1
+    else:
+        m = re.search(r"(\d+)(\+?)\s*days?", t)
+        if not m:
+            return None
+        days = int(m.group(1)) + (1 if m.group(2) else 0)
+    return (today - timedelta(days=days)).isoformat()
+
+
 def fetch_workday(entry: dict, search_terms: list[str], max_pages: int, delay: float) -> list[Job]:
     """List jobs via the same JSON endpoint the Workday career site uses. Details are filled in later,
     and only for postings that pass the title filter (see fill_workday_detail)."""
@@ -150,7 +181,7 @@ def fetch_workday(entry: dict, search_terms: list[str], max_pages: int, delay: f
         total = None
         for page in range(max_pages):
             body = {"appliedFacets": {}, "limit": 20, "offset": page * 20, "searchText": term}
-            r = requests.post(f"{base}/jobs", json=body, headers={**UA, "Content-Type": "application/json"}, timeout=TIMEOUT)
+            r = _session().post(f"{base}/jobs", json=body, timeout=TIMEOUT)
             r.raise_for_status()
             data = r.json()
             postings = data.get("jobPostings", [])
@@ -165,7 +196,7 @@ def fetch_workday(entry: dict, search_terms: list[str], max_pages: int, delay: f
                 seen[path] = Job(
                     id=f"wd:{tenant}:{path.rsplit('_', 1)[-1] or path}", source="workday", company=name,
                     title=p.get("title", ""), location=p.get("locationsText", ""),
-                    url=f"https://{host}/en-US/{site}{path}", posted=None,
+                    url=f"https://{host}/en-US/{site}{path}", posted=workday_posted(p.get("postedOn", "")),
                     detail={"api": f"{base}{path}"},
                 )
             time.sleep(delay)
@@ -177,7 +208,7 @@ def fetch_workday(entry: dict, search_terms: list[str], max_pages: int, delay: f
 def fill_workday_detail(job: Job) -> None:
     info = _get(job.detail["api"]).get("jobPostingInfo", {})
     job.description = strip_html(info.get("jobDescription", ""))
-    job.posted = (info.get("startDate") or "")[:10] or None
+    job.posted = (info.get("startDate") or "")[:10] or job.posted
     # The list only says "6 Locations" for a multi-location posting. The real places are in the detail, and the location
     # filters need them: a "2 Locations" job can turn out to be in Australia, or in California.
     places = [p for p in [info.get("location"), *(info.get("additionalLocations") or [])] if p]

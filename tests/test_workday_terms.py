@@ -1,6 +1,8 @@
 """Workday search words derived from the title list, and Workday paging that stops when a search is exhausted. No network."""
 import unittest
+from datetime import date
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 import yaml
@@ -81,11 +83,11 @@ class WorkdayPagingTests(unittest.TestCase):
     def run_fetch(self, responses, max_pages=20, terms=("software engineer",)):
         calls = []
 
-        def fake_post(url, json, headers, timeout):
+        def fake_post(url, json, timeout):
             calls.append(json)
             return responses[len(calls) - 1]
 
-        with mock.patch.object(sources.requests, "post", fake_post):
+        with mock.patch.object(sources, "_session", lambda: SimpleNamespace(post=fake_post)):
             jobs = sources.fetch_workday(ENTRY, list(terms), max_pages, 0)
         return jobs, calls
 
@@ -120,6 +122,27 @@ class WorkdayPagingTests(unittest.TestCase):
         self.assertEqual([c["searchText"] for c in calls], ["software engineer", "platform engineer"])
         self.assertEqual([c["offset"] for c in calls], [0, 0])
         self.assertEqual(len(jobs), 8)
+
+
+class WorkdayPostedTests(unittest.TestCase):
+    TODAY = date(2026, 10, 30)
+
+    def test_relative_dates_become_iso_dates(self):
+        f = lambda t: sources.workday_posted(t, self.TODAY)
+        self.assertEqual(f("Posted Today"), "2026-10-30")
+        self.assertEqual(f("Posted Yesterday"), "2026-10-29")
+        self.assertEqual(f("Posted 5 Days Ago"), "2026-10-25")
+        self.assertEqual(f("Posted 1 Day Ago"), "2026-10-29")
+        self.assertEqual(f("Posted 30+ Days Ago"), "2026-09-29")   # 31 days: older than a 30-day limit
+        self.assertIsNone(f(""))
+        self.assertIsNone(f("Posted recently"))
+
+    def test_the_list_date_is_kept_on_the_job_and_old_ones_fail_the_age_filter(self):
+        page_postings = [{"title": "Software Engineer", "externalPath": "/job/A/x_R1", "locationsText": "Austin, TX", "postedOn": "Posted 30+ Days Ago"},
+                         {"title": "Software Engineer", "externalPath": "/job/A/y_R2", "locationsText": "Austin, TX", "postedOn": "Posted Today"}]
+        with mock.patch.object(sources, "_session", lambda: SimpleNamespace(post=lambda url, json, timeout: FakeResponse(page_postings, 2))):
+            jobs = sources.fetch_workday(ENTRY, ["software engineer"], 1, 0)
+        self.assertEqual([filters.age_ok(j.posted, 30) for j in jobs], [False, True])
 
 
 if __name__ == "__main__":

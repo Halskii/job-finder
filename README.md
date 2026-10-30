@@ -89,7 +89,7 @@ Postings come from public job-board data that companies publish themselves: **Gr
 - Boards added this way are stored in `discovered_sources.yaml` and merged with `sources` in `config.yaml` each run, so `config.yaml` and its comments are never rewritten. You can also add slugs to `config.yaml` by hand, including a `smartrecruiters:` list (`jobs.smartrecruiters.com/<CompanyId>`, not case sensitive).
 - **Remotive** (`feeds.remotive` in `config.yaml`): remote jobs, limited to the categories you list. Its terms ask for no more than about four requests a day, so it is fetched at most once every `min_hours` (default 6) no matter how often you run the program. Its job links go to remotive.com, as its terms require.
 - **Duplicates:** if the same company and title is already stored from a different source, for example a job on both a company's board and Remotive, the second copy is skipped (shown as `duplicates` in the run summary). The same title in two different cities from one source is kept, because those are separate postings.
-- **Many Workday sites:** `workday-add` and `discovery` can build a list of a hundred or more sites. Sites are read several at a time (`workday_workers`), each with one request at a time. A first run over ~100 sites took about 20 minutes (22,000 postings read, ~700 new matches stored); later runs only fetch details for postings not yet stored, so they are much faster. With that many sites, use a short `workday_search_terms` list rather than `auto`.
+- **Many Workday sites:** `workday-add` and `discovery` can build a list of a hundred or more sites. Sites are read several at a time (`workday_workers`), each with one request at a time. A first run over ~100 sites read 22,000 postings and stored ~700 new matches; each run prints how long listing, full-posting lookups, and scoring took. Later runs only fetch details for postings not yet stored, so they are faster. With that many sites, use a short `workday_search_terms` list rather than `auto`.
 - Not included: Adzuna (needs a free key), Oracle and iCIMS career sites (no clean public data), and Workable (its old public endpoint now returns nothing).
 
 ### Government jobs (on by default)
@@ -138,11 +138,11 @@ How it works:
 ## Configuration (`config.yaml`)
 
 - `min_pay`, `max_age_days`, `us_only`, `request_delay`
-- `workday_workers`, `detail_workers`: how many different servers are read at the same time (default 6 each). Each server still gets only one request at a time, spaced by `request_delay`, so adding many Workday sites makes a run longer but does not hammer any one site.
+- `workday_workers`, `detail_workers`, `fetch_workers`: how many different servers are read at the same time (defaults 16, 16, 8). Each Workday site and each full-posting server still gets only one request at a time, spaced by `request_delay`, so adding many sites makes a run longer but does not hammer any one site. The Greenhouse, Lever, Ashby and SmartRecruiters boards are small lists from shared public APIs, read up to `fetch_workers` at a time. Connections are reused between requests.
 - `exclude_locations`: places to drop (California and its major cities are pre-filled). A posting is dropped only if **every** location it lists matches, so "San Francisco, CA | Remote - US" is kept because the remote option is still open to you. Matching is whole-word and case-insensitive, except two-letter state codes, which must be capitalized (`CA`). Add or remove entries freely, or delete the list to turn it off. Check what's stored with `python inspect_db.py --where "california"`.
 - `titles`: your title list (from `filter.txt`), and `exclude_title_words`
 - `gov_titles`: extra titles used only for government sources
-- `scoring`: `model`, `max_per_run` (cost cap), `report_min_score`, `report_size`, `price_per_million_tokens`
+- `scoring`: `model`, `max_per_run` (cost cap), `workers` (API calls at the same time, default 8; lower it if you hit rate limits), `report_min_score`, `report_size`, `price_per_million_tokens`
 - `profile_model`: the model used by `main.py profile`
 - `sources`: company boards to read
   - Greenhouse, Lever, Ashby: add the slug from the board URL (`boards.greenhouse.io/<slug>`, `jobs.lever.co/<slug>`, `jobs.ashbyhq.com/<slug>`). Bad slugs are skipped with a warning.

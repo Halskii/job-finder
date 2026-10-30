@@ -13,7 +13,7 @@ import os
 import re
 import sys
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date
 from pathlib import Path
 from urllib.parse import urlparse
@@ -83,15 +83,25 @@ def collect(cfg: dict, conn=None) -> list[sources.Job]:
     jobs: list[sources.Job] = []
     plan = [("greenhouse", sources.fetch_greenhouse), ("lever", sources.fetch_lever), ("ashby", sources.fetch_ashby),
             ("smartrecruiters", sources.fetch_smartrecruiters)]
-    for kind, fn in plan:
-        for slug in src.get(kind, []) or []:
-            try:
-                got = fn(slug)
+    tasks = [(kind, fn, slug) for kind, fn in plan for slug in src.get(kind, []) or []]
+
+    def one(task):
+        kind, fn, slug = task
+        try:
+            return kind, slug, fn(slug), None
+        except Exception as e:  # bad slug, rate limit, network: skip and keep going
+            return kind, slug, [], e
+        finally:
+            time.sleep(delay)
+
+    # The boards are small, separate lists, so several are read at once. pool.map keeps them in config order.
+    with ThreadPoolExecutor(max_workers=max(1, int(cfg.get("fetch_workers", 8)))) as pool:
+        for kind, slug, got, err in pool.map(one, tasks):
+            if err:
+                log(f"  {kind:10s} {slug:18s} skipped ({type(err).__name__}: {str(err)[:70]})")
+            else:
                 log(f"  {kind:10s} {slug:18s} {len(got):4d} postings")
                 jobs += got
-            except Exception as e:  # bad slug, rate limit, network: skip and keep going
-                log(f"  {kind:10s} {slug:18s} skipped ({type(e).__name__}: {str(e)[:70]})")
-            time.sleep(delay)
     jobs += collect_workday(cfg, src.get("workday", []) or [], delay)
     jobs += collect_feeds(cfg, conn)
     jobs += collect_government(cfg)
@@ -99,7 +109,7 @@ def collect(cfg: dict, conn=None) -> list[sources.Job]:
 
 
 def collect_workday(cfg: dict, entries: list[dict], delay: float) -> list[sources.Job]:
-    """Read every Workday site. Sites are different servers, so several are read at once (`workday_workers`, default 6);
+    """Read every Workday site. Sites are different servers, so several are read at once (`workday_workers`, default 16);
     each site is still read one request at a time, with `request_delay` between requests."""
     terms, pages = filters.workday_terms(cfg), cfg.get("workday_max_pages", 3)
 
@@ -110,7 +120,7 @@ def collect_workday(cfg: dict, entries: list[dict], delay: float) -> list[source
             return entry, [], e
 
     jobs: list[sources.Job] = []
-    with ThreadPoolExecutor(max_workers=max(1, int(cfg.get("workday_workers", 6)))) as pool:
+    with ThreadPoolExecutor(max_workers=max(1, int(cfg.get("workday_workers", 16)))) as pool:
         for entry, got, err in pool.map(one, entries):
             name = entry.get("name", entry["tenant"])
             if err:
@@ -200,7 +210,9 @@ def collect_feeds(cfg: dict, conn) -> list[sources.Job]:
 
 def cmd_run(args, cfg, profile, conn) -> None:
     log("Fetching postings...")
+    t0 = time.time()
     jobs = collect(cfg, conn)
+    t_list = time.time() - t0
     patterns = filters.base_titles(cfg["titles"])
     gov_patterns = patterns + filters.base_titles(cfg.get("gov_titles", []))   # government titles read differently
     exclude = [w.lower() for w in cfg.get("exclude_title_words", [])]
@@ -221,12 +233,17 @@ def cmd_run(args, cfg, profile, conn) -> None:
         if conn.execute("SELECT 1 FROM jobs WHERE id=?", (job.id,)).fetchone():
             stats["seen"] += 1
             continue
+        if not filters.age_ok(job.posted, cfg.get("max_age_days", 30)):   # a date from the list: no need to fetch the full posting
+            stats["age"] += 1
+            continue
         candidates.append(job)
 
     # Sources whose lists have no description need one extra request per job. Only jobs that passed the cheap filters
     # above, and are not already stored from another source, are looked up, several servers at a time.
     need = [j for j in candidates if j.source in sources.DETAIL_FILLERS and not db.is_cross_source_duplicate(conn, j)]
-    failed = prefetch_details(need, cfg.get("detail_workers", 6), cfg.get("request_delay", 0.4)) if need else set()
+    t1 = time.time()
+    failed = prefetch_details(need, cfg.get("detail_workers", 16), cfg.get("request_delay", 0.4)) if need else set()
+    t_detail = time.time() - t1
 
     for job in candidates:
         if db.is_cross_source_duplicate(conn, job):   # same company + title already stored from another source
@@ -250,6 +267,7 @@ def cmd_run(args, cfg, profile, conn) -> None:
     log(f"\nFetched {stats['fetched']} | title match {stats['title']} | after location {stats['location']} | "
         f"excluded locations {stats['excluded']} | already seen {stats['seen']} | duplicates {stats['dupe']} | dropped by full location {stats['late']} | too old {stats['age']} | "
         f"below pay {stats['pay']} | NEW {stats['new']}")
+    log(f"Time: listing {t_list:.0f}s | full postings {t_detail:.0f}s ({len(need)} looked up)")
 
     if args.no_llm:
         log("Skipping LLM scoring (--no-llm). Jobs are stored; run again without the flag to score them.")
@@ -261,7 +279,7 @@ def cmd_run(args, cfg, profile, conn) -> None:
         log("\nNo ANTHROPIC_API_KEY found (set it in .env or your environment). Skipping scoring.")
         return
     import anthropic
-    client = anthropic.Anthropic(api_key=key)
+    client = anthropic.Anthropic(api_key=key, max_retries=6)   # retries rate-limit (429) and overloaded responses with backoff
     resume_text = load_resume()
     log(f"Resume context: {'loaded' if resume_text else 'none (add resume.txt)'}")
     scfg = cfg.get("scoring", {})
@@ -269,17 +287,29 @@ def cmd_run(args, cfg, profile, conn) -> None:
     loc_excl = filters.compile_exclusions(cfg.get("exclude_locations", []))
     # jobs stored before an exclusion was added must not be scored (that would waste API credits)
     todo = visible(db.unscored(conn, limit * 4), loc_excl)[:limit]
-    log(f"\nScoring {len(todo)} jobs with {scfg.get('model')}...")
+    workers = max(1, int(scfg.get("workers", 8)))
+    log(f"\nScoring {len(todo)} jobs with {scfg.get('model')}, {workers} at a time...")
+    t2 = time.time()
     tok_in = tok_out = 0
-    for i, row in enumerate(todo, 1):
-        try:
-            res = scorer.score_job(client, scfg["model"], profile, row, cfg.get("min_pay", 0), resume_text)
-            db.save_score(conn, row["id"], res["fit_score"], res["verdict"], res)
-            tok_in += res.get("_in", 0)
-            tok_out += res.get("_out", 0)
-            log(f"  [{i}/{len(todo)}] {res['fit_score']:3d} {res['verdict']:5s} {row['company']} - {row['title']}")
-        except Exception as e:
-            log(f"  [{i}/{len(todo)}] error on {row['title']}: {type(e).__name__}: {str(e)[:80]}")
+
+    def score_one(row):
+        return scorer.score_job(client, scfg["model"], profile, row, cfg.get("min_pay", 0), resume_text)
+
+    # The API calls run in worker threads. Results are stored here, one at a time, because a SQLite connection
+    # belongs to the thread that made it.
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = {pool.submit(score_one, row): row for row in todo}
+        for i, fut in enumerate(as_completed(futures), 1):
+            row = futures[fut]
+            try:
+                res = fut.result()
+                db.save_score(conn, row["id"], res["fit_score"], res["verdict"], res)
+                tok_in += res.get("_in", 0)
+                tok_out += res.get("_out", 0)
+                log(f"  [{i}/{len(todo)}] {res['fit_score']:3d} {res['verdict']:5s} {row['company']} - {row['title']}")
+            except Exception as e:
+                log(f"  [{i}/{len(todo)}] error on {row['title']}: {type(e).__name__}: {str(e)[:80]}")
+    log(f"Scoring took {time.time() - t2:.0f}s")
     price = scfg.get("price_per_million_tokens", {})
     cost = tok_in / 1e6 * price.get("input", 0) + tok_out / 1e6 * price.get("output", 0)
     log(f"\nTokens: {tok_in:,} in / {tok_out:,} out | estimated cost ${cost:.3f} "

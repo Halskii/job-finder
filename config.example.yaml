@@ -18,6 +18,7 @@ profile_model: claude-sonnet-5-5   # used by `main.py profile` to read resume.pd
 scoring:
   model: claude-haiku-4-5-20251001   # cheap first pass; switch to claude-sonnet-5-5 for deeper analysis
   max_per_run: 40                    # cap LLM calls per run to control cost
+  workers: 8                          # scoring calls made at the same time (lower this if you see rate-limit errors)
   report_min_score: 60               # only show jobs scoring at least this in the report
   report_size: 25
   price_per_million_tokens: {input: 1.0, output: 5.0}   # USD for the scoring model above; edit if prices change
@@ -48,8 +49,9 @@ exclude_title_words: [senior, sr, staff, principal, lead, manager, director, hea
 # your own list, or mix: [auto, devops, "machine learning"] adds extra words to the derived ones.
 workday_search_terms: auto
 workday_max_pages: 3
-workday_workers: 6        # Workday sites read at the same time (each site still gets one request at a time)
-detail_workers: 6         # servers asked for full postings at the same time (same rule: one request at a time per server)
+workday_workers: 16       # Workday sites read at the same time (each site still gets one request at a time)
+detail_workers: 16        # servers asked for full postings at the same time (same rule: one request at a time per server)
+fetch_workers: 8          # Greenhouse / Lever / Ashby / SmartRecruiters boards read at the same time
 
 # Job boards. Add any company that uses these systems (or let `main.py discover` / `main.py workday-add` do it for you):
 #   Greenhouse:      boards.greenhouse.io/<slug> or job-boards.greenhouse.io/<slug>

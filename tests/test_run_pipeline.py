@@ -1,6 +1,7 @@
 """The fetch -> filter -> store part of `main.py run`, with the network replaced by fake postings."""
 import argparse
 import io
+import os
 import tempfile
 import threading
 import time
@@ -115,6 +116,17 @@ class PipelineTests(PipelineBase):
         db.add_job(self.conn, wd("wd:big:seen"), 0)
         self.run_pipeline([wd("wd:big:chef", title="Chef"), wd("wd:big:uk", location="London, UK"), wd("wd:big:seen"), wd("wd:big:new")], fill=fill)
         self.assertEqual(fetched, ["wd:big:new"])
+
+    def test_postings_too_old_by_the_list_date_are_never_looked_up(self):
+        fetched = []
+
+        def fill(j):
+            fetched.append(j.id)
+            j.description = "x"
+
+        self.run_pipeline([wd("wd:big:old", posted="2020-01-01"), wd("wd:big:fresh", posted="2099-01-01")], fill=fill)
+        self.assertEqual(fetched, ["wd:big:fresh"])
+        self.assertEqual(self.stored(), {"wd:big:fresh"})
 
     def test_a_second_run_stores_nothing_new(self):
         jobs = [job("gh:good:1", company="Good"), wd("wd:big:1")]
@@ -249,6 +261,89 @@ class CollectWorkdayTests(unittest.TestCase):
         self.collect(fake, {"titles": ["Software Engineer II", "DevOps Engineer"], "workday_search_terms": "auto", "workday_max_pages": 2})
         self.assertEqual(set(seen), {(("software engineer", "devops engineer"), 2)})
         self.assertEqual(len(seen), 6)
+
+
+class CollectBoardsTests(unittest.TestCase):
+    """Greenhouse / Lever / Ashby boards are read several at a time, results kept in config order."""
+
+    CFG = {"sources": {"greenhouse": ["g1", "g2", "g3"], "lever": ["l1"], "ashby": ["a1"]}, "request_delay": 0, "fetch_workers": 4,
+           "feeds": {}, "government": {"usajobs": {"enabled": False}, "texas_hhs": {"enabled": False}}}
+
+    def test_order_failures_and_overlap(self):
+        lock = threading.Lock()
+        state = {"now": 0, "peak": 0}
+
+        def fetcher(kind):
+            def fn(slug):
+                with lock:
+                    state["now"] += 1
+                    state["peak"] = max(state["peak"], state["now"])
+                time.sleep(0.04)
+                with lock:
+                    state["now"] -= 1
+                if slug == "g2":
+                    raise RuntimeError("no such board")
+                return [job(f"{kind}:{slug}", company=slug)]
+            return fn
+
+        out = io.StringIO()
+        with mock.patch.object(sources, "fetch_greenhouse", fetcher("gh")), mock.patch.object(sources, "fetch_lever", fetcher("lv")), \
+                mock.patch.object(sources, "fetch_ashby", fetcher("ab")), mock.patch.object(sources, "fetch_smartrecruiters", fetcher("sr")), \
+                redirect_stdout(out):
+            jobs = main.collect(self.CFG, None)
+        self.assertEqual([j.id for j in jobs], ["gh:g1", "gh:g3", "lv:l1", "ab:a1"])
+        self.assertIn("skipped (RuntimeError: no such board)", out.getvalue())
+        self.assertGreater(state["peak"], 1)
+        self.assertLessEqual(state["peak"], 4)
+
+
+class ScoringTests(PipelineBase):
+    """Claude scoring runs in several threads; results are stored by the main thread."""
+
+    def run_scoring(self, n_jobs, score_fn, workers=3):
+        for i in range(n_jobs):
+            db.add_job(self.conn, job(f"gh:s:{i}", title=f"Software Engineer {i}", company=f"Co{i}"), 0)
+        cfg = {**CFG, "scoring": {"model": "m", "max_per_run": 100, "workers": workers,
+                                  "price_per_million_tokens": {"input": 1.0, "output": 5.0}}}
+        out = io.StringIO()
+        fake_anthropic = mock.MagicMock()
+        with mock.patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test"}), mock.patch.object(main, "load_env"), \
+                mock.patch.object(main, "load_resume", return_value=""), mock.patch.object(main, "write_report"), \
+                mock.patch.object(main, "collect", return_value=[]), mock.patch.dict("sys.modules", {"anthropic": fake_anthropic}), \
+                mock.patch.object(main.scorer, "score_job", score_fn), redirect_stdout(out):
+            main.cmd_run(argparse.Namespace(no_llm=False, limit=None), cfg, {}, self.conn)
+        return out.getvalue()
+
+    def test_all_jobs_are_scored_in_parallel_and_saved(self):
+        lock = threading.Lock()
+        state = {"now": 0, "peak": 0}
+
+        def score(client, model, profile, row, min_pay, resume):
+            with lock:
+                state["now"] += 1
+                state["peak"] = max(state["peak"], state["now"])
+            time.sleep(0.03)
+            with lock:
+                state["now"] -= 1
+            return {"fit_score": 70, "verdict": "maybe", "_in": 1000, "_out": 100}
+
+        text = self.run_scoring(9, score, workers=3)
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM jobs WHERE score IS NOT NULL").fetchone()[0], 9)
+        self.assertEqual(state["peak"], 3)
+        self.assertIn("Tokens: 9,000 in / 900 out", text)
+        self.assertIn("Scoring took", text)
+
+    def test_one_failed_call_does_not_stop_the_rest_and_stays_unscored(self):
+        def score(client, model, profile, row, min_pay, resume):
+            if row["company"] == "Co2":
+                raise RuntimeError("overloaded")
+            return {"fit_score": 60, "verdict": "maybe", "_in": 1, "_out": 1}
+
+        text = self.run_scoring(5, score)
+        scored = {r["company"] for r in self.conn.execute("SELECT company FROM jobs WHERE score IS NOT NULL")}
+        self.assertEqual(scored, {"Co0", "Co1", "Co3", "Co4"})
+        self.assertIn("error on Software Engineer 2: RuntimeError: overloaded", text)
+        self.assertEqual(len(db.unscored(self.conn, 10)), 1)       # retried on the next run
 
 
 if __name__ == "__main__":
