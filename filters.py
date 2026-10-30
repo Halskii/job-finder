@@ -16,6 +16,7 @@ NON_US_HINTS = [
     "copenhagen", "norway", "oslo", "finland", "helsinki", "czech", "prague", "ukraine", "kyiv", "hungary", "budapest",
     "greece", "athens", "egypt", "cairo", "nigeria", "lagos", "kenya", "nairobi", "south africa", "cape town", "pakistan",
     "bangladesh", "sri lanka", "hong kong", "ontario", "quebec", "british columbia", "montreal", "ottawa", "calgary",
+    "europe", "asia", "africa", "latin america", "middle east",
 ]
 US_HINTS = ["united states", "usa", "u.s.", ", us", "remote - us", "us-remote", "us remote"]
 US_STATE_RE = re.compile(r",\s*(A[LKZR]|C[AOT]|D[EC]|F[L]|G[A]|H[I]|I[ADLN]|K[SY]|L[A]|M[ADEINOST]|N[CDEHJMVY]|O[HKR]|P[AR]|R[I]|S[CD]|T[NX]|U[T]|V[AT]|W[AIVY])\b")
