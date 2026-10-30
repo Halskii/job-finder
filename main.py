@@ -25,7 +25,7 @@ import scorer
 import sources
 
 ROOT = Path(__file__).parent
-STATUSES = {"new", "saved", "applied", "skipped", "interview", "rejected", "offer"}
+STATUSES = {"new", "saved", "applied", "skipped", "interview", "offer", "accepted", "rejected", "withdrawn"}
 
 
 def load_env() -> None:
