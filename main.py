@@ -79,13 +79,27 @@ def log(msg: str) -> None:
     print(msg, flush=True)
 
 
+PLATFORMS = [kind for kind, _, _ in discovery.BOARD_FETCHERS] + ["workday"]   # the names `platforms:` in config.yaml accepts
+
+
+def platform_enabled(cfg: dict, name: str) -> bool:
+    """False when the `platforms:` section of config.yaml turns this board platform off. One that is not listed is on."""
+    return bool((cfg.get("platforms") or {}).get(name, True))
+
+
 def collect(cfg: dict, conn=None) -> list[sources.Job]:
     delay = cfg.get("request_delay", 0.4)
     src = cfg.get("sources", {})
     jobs: list[sources.Job] = []
-    plan = [(kind, getattr(mod, fn)) for kind, mod, fn in discovery.BOARD_FETCHERS]
+    for name in cfg.get("platforms") or {}:   # a typo would otherwise switch nothing off and say nothing
+        if name not in PLATFORMS:
+            log(f"  platforms: '{name}' is not a platform name (ignored). Names: {', '.join(PLATFORMS)}")
+    for kind in PLATFORMS:
+        if not platform_enabled(cfg, kind) and src.get(kind):
+            log(f"  {kind:10s} turned off in config.yaml (platforms), {len(src[kind])} board(s) not read")
+    plan = [(kind, getattr(mod, fn)) for kind, mod, fn in discovery.BOARD_FETCHERS if platform_enabled(cfg, kind)]
     tasks = [(kind, fn, slug) for kind, fn in plan for slug in src.get(kind, []) or []]
-    workday = src.get("workday", []) or []
+    workday = (src.get("workday", []) or []) if platform_enabled(cfg, "workday") else []
 
     def one(task):
         kind, fn, slug = task
@@ -279,6 +293,8 @@ def require_anthropic() -> None:
 
 
 def cmd_run(args, cfg, profile, conn) -> None:
+    """The whole pipeline: fetch every source, filter cheaply, read full postings where a site only lists titles,
+    store what is new, then score the best unscored jobs with Claude and write the report."""
     if not args.no_llm:
         load_env()
         if os.environ.get("ANTHROPIC_API_KEY"):   # without a key, scoring is skipped anyway
@@ -291,9 +307,11 @@ def cmd_run(args, cfg, profile, conn) -> None:
     gov_patterns = patterns + filters.base_titles(cfg.get("gov_titles", []))   # government titles read differently
     exclude = [w.lower() for w in cfg.get("exclude_title_words", [])]
     loc_excl = filters.compile_exclusions(cfg.get("exclude_locations", []))
+    # How many postings each step dropped or kept; printed as the one-line summary after filtering.
     stats = {"fetched": len(jobs), "title": 0, "location": 0, "excluded": 0, "pay": 0, "age": 0, "new": 0, "seen": 0, "dupe": 0, "late": 0}
 
     log(f"\nFiltering {len(jobs):,} postings...")
+    # Pass 1: free filters only, in order of cheapness. A job that fails any of them is never looked up or stored.
     candidates = []
     for job in jobs:
         use_gov = job.source in gov_sources.GOV_SOURCES or job.detail.get("gov")
@@ -323,11 +341,13 @@ def cmd_run(args, cfg, profile, conn) -> None:
     failed = prefetch_details(need, cfg.get("detail_workers", 16), cfg.get("request_delay", 0.4)) if need else set()
     t_detail = time.time() - t1
 
+    # Pass 2: now that descriptions are filled in, apply what could not be checked before (real location, pay,
+    # duplicates from other sources) and store the survivors.
     for job in candidates:
         if db.is_cross_source_duplicate(conn, job):   # same company + title already stored from another source
             stats["dupe"] += 1
             continue
-        if job.id in failed:
+        if job.id in failed:   # the lookup failed; it is not stored, so the next run tries it again
             continue
         if job.source in sources.DETAIL_FILLERS and not (filters.location_ok(job.location, cfg.get("us_only", True))
                                                          and filters.exclusion_ok(job.location, loc_excl)):
@@ -356,13 +376,13 @@ def cmd_run(args, cfg, profile, conn) -> None:
     if not key:
         log("\nNo ANTHROPIC_API_KEY found (set it in .env or your environment). Skipping scoring.")
         return
+    # Scoring: the stored jobs that look best by keyword overlap are scored first, up to the per-run limit.
     import anthropic
     client = anthropic.Anthropic(api_key=key, max_retries=6)   # retries rate-limit (429) and overloaded responses with backoff
     resume_text = load_resume()
     log(f"Resume context: {'loaded' if resume_text else 'none (add resume.txt)'}")
     scfg = cfg.get("scoring", {})
     limit = args.limit or scfg.get("max_per_run", 40)
-    loc_excl = filters.compile_exclusions(cfg.get("exclude_locations", []))
     # jobs stored before an exclusion was added must not be scored (that would waste API credits)
     todo = visible(db.unscored(conn, limit * 4), loc_excl)[:limit]
     workers = max(1, int(scfg.get("workers", 8)))
@@ -401,10 +421,12 @@ def visible(rows, loc_excl) -> list:
 
 
 def money(v) -> str:
+    """A pay figure for the report, or "?" when the posting did not list one."""
     return f"${v:,}" if v else "?"
 
 
 def write_report(conn, cfg) -> Path | None:
+    """Write reports/<today>.md with the best scored jobs, highest score first. Rerunning on the same day overwrites it."""
     scfg = cfg.get("scoring", {})
     size = scfg.get("report_size", 25)
     rows = visible(db.top(conn, size * 4, scfg.get("report_min_score", 60)),
@@ -491,7 +513,7 @@ def cmd_crawl(args, cfg, profile, conn) -> None:
     bad = [s for s in systems if s not in crawl.PATTERNS]
     if bad:
         sys.exit(f"Unknown platform(s): {', '.join(bad)}. Choose from: {', '.join(crawl.PATTERNS)}")
-    ids = crawl.resolve_ids(ROOT, args.crawls, log)
+    ids = crawl.resolve_ids(ROOT, args.crawls)
     if not ids:
         log("Common Crawl's index is not answering right now, so no boards could be looked up. Nothing is wrong with your setup and "
             "nothing was lost. It is a shared free service that sometimes refuses connections for a while after heavy use. "
@@ -621,6 +643,7 @@ def main() -> None:
     cfg = discovery.load_config(ROOT)
     profile = json.loads((ROOT / "profile.json").read_text(encoding="utf-8"))
     conn = db.connect(str(ROOT / "jobs.db"))
+    # Every command takes the same four arguments, even those that ignore some of them.
     {"run": cmd_run, "list": cmd_list, "mark": cmd_mark, "profile": cmd_profile,
      "discover": cmd_discover, "workday-add": cmd_workday_add, "crawl": cmd_crawl}[args.cmd](args, cfg, profile, conn)
 

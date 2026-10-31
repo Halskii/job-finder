@@ -70,6 +70,21 @@ sources:
   # Example Workday entry:
   #  - {name: Vanguard, host: vanguard.wd5.myworkdayjobs.com, tenant: vanguard, site: vanguard_external}
 
+# Turn a whole platform off by setting it to false (a platform not listed here is on). Its boards stay in your lists and
+# are skipped, with a note in the run output. Aggregator feeds and government sources have their own `enabled:` below.
+platforms:
+  greenhouse: true
+  lever: true
+  ashby: true
+  smartrecruiters: true
+  workable: true
+  recruitee: true
+  bamboohr: true
+  rippling: true
+  gem: true
+  personio: true
+  workday: true
+
 # Aggregator feeds, each on when `enabled: true`. Each is fetched at most once per `min_hours` (default 6; Remotive asks for
 # at most ~4 requests a day). Job links go to the feed's own site, as their terms require. Remotive details:
 # Its job links go to remotive.com, as their terms require. Categories: software-development, devops,

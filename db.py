@@ -64,6 +64,7 @@ def set_meta(conn, key: str, value: str) -> None:
 
 
 def add_job(conn, job, quick: float) -> bool:
+    """Store a posting. False when its id is already there, so a job seen on an earlier run is never added twice."""
     cur = conn.execute(
         "INSERT OR IGNORE INTO jobs (id, source, company, title, location, url, posted, pay_min, pay_max,"
         " description, quick_score, first_seen, dedupe_key) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
@@ -75,18 +76,21 @@ def add_job(conn, job, quick: float) -> bool:
 
 
 def unscored(conn, limit: int):
+    """Jobs not yet scored, best keyword match first, so a limited number of API calls goes to the likeliest fits."""
     return conn.execute(
         "SELECT * FROM jobs WHERE score IS NULL AND status='new' ORDER BY quick_score DESC LIMIT ?", (limit,)
     ).fetchall()
 
 
 def save_score(conn, job_id: str, score: int, verdict: str, analysis: dict) -> None:
+    """Record the model's answer; the full analysis is kept as JSON for the report and viewer."""
     conn.execute("UPDATE jobs SET score=?, verdict=?, analysis=? WHERE id=?",
                  (score, verdict, json.dumps(analysis), job_id))
     conn.commit()
 
 
 def top(conn, n: int, min_score: int):
+    """Best scored jobs still open to you (new or saved, not applied or skipped), highest score first."""
     return conn.execute(
         "SELECT * FROM jobs WHERE score IS NOT NULL AND score>=? AND status IN ('new','saved')"
         " ORDER BY score DESC, quick_score DESC LIMIT ?", (min_score, n)

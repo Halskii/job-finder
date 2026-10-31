@@ -4,7 +4,9 @@ from __future__ import annotations
 import re
 from datetime import date, datetime
 
+# Words dropped from a title before matching, so "Software Engineer II" and "Software Engineer" are the same search.
 LEVEL_WORDS = {"i", "ii", "iii", "iv", "1", "2", "3", "associate", "junior", "jr"}
+# Places that mark a posting as outside the US. Matched as whole words in location_ok.
 NON_US_HINTS = [
     "united kingdom", "uk", "london", "ireland", "dublin", "canada", "toronto", "vancouver", "india", "bangalore", "bengaluru",
     "hyderabad", "pune", "germany", "berlin", "munich", "france", "paris", "spain", "madrid", "netherlands", "amsterdam",
@@ -18,11 +20,14 @@ NON_US_HINTS = [
     "bangladesh", "sri lanka", "hong kong", "ontario", "quebec", "british columbia", "montreal", "ottawa", "calgary",
     "europe", "asia", "africa", "latin america", "middle east",
 ]
+# Phrases that mark a posting as US even when it also names a non-US word ("Remote - US, Canada").
 US_HINTS = ["united states", "usa", "u.s.", ", us", "remote - us", "us-remote", "us remote"]
+# ", TX"-style endings: a comma, then a two-letter US state or DC code. Case-sensitive on purpose, so ", in" does not match.
 US_STATE_RE = re.compile(r",\s*(A[LKZR]|C[AOT]|D[EC]|F[L]|G[A]|H[I]|I[ADLN]|K[SY]|L[A]|M[ADEINOST]|N[CDEHJMVY]|O[HKR]|P[AR]|R[I]|S[CD]|T[NX]|U[T]|V[AT]|W[AIVY])\b")
 
 
 def _norm(text: str) -> str:
+    """Lowercase, with punctuation turned into spaces (keeping + / # for "C++", "CI/CD", "C#") and spaces collapsed."""
     text = text.lower().replace("&", " and ")
     text = re.sub(r"[^a-z0-9+/# ]+", " ", text)
     return re.sub(r"\s+", " ", text).strip()
@@ -60,6 +65,7 @@ def workday_terms(cfg: dict) -> list[str]:
 
 
 def title_ok(title: str, patterns: list[re.Pattern], exclude_words: list[str]) -> bool:
+    """True when the title contains one of the wanted titles and none of the excluded words (senior, staff, ...)."""
     norm = _norm(title)
     words = {w.rstrip("+") for w in norm.split()}   # "Staff+" -> "staff"
     if any(w in words for w in exclude_words):
@@ -68,6 +74,8 @@ def title_ok(title: str, patterns: list[re.Pattern], exclude_words: list[str]) -
 
 
 def location_ok(location: str, us_only: bool) -> bool:
+    """With us_only on, drop a posting only when its location clearly names somewhere else. An empty or unfamiliar
+    location is kept, because wrongly dropping a real job costs more than reading one extra."""
     if not us_only:
         return True
     loc = (location or "").lower()
@@ -104,6 +112,7 @@ def exclusion_ok(location: str, patterns: list[re.Pattern]) -> bool:
 
 
 def pay_ok(pay_max: int | None, pay_min: int | None, minimum: int) -> bool:
+    """True when the listed pay reaches the minimum. A posting with no pay listed always passes."""
     if pay_max is not None:
         return pay_max >= minimum
     if pay_min is not None:
@@ -112,6 +121,7 @@ def pay_ok(pay_max: int | None, pay_min: int | None, minimum: int) -> bool:
 
 
 def age_ok(posted: str | None, max_age_days: int) -> bool:
+    """True when the posting is recent enough. A missing or unreadable date passes, since many sites do not give one."""
     if not posted:
         return True
     try:
@@ -128,6 +138,7 @@ def quick_score(description: str, profile: dict) -> float:
         return 0.0
     def hits(terms):
         return sum(1 for t in terms if re.search(r"(?<![a-z0-9])" + re.escape(_norm(t)) + r"(?![a-z0-9])", text))
+    # A strong skill counts fully, a familiar one half, and something in do_not_assume counts against the job.
     good = hits(profile.get("strong_skills", [])) * 1.0 + hits(profile.get("familiar_skills", [])) * 0.5
     bad = hits(profile.get("do_not_assume", [])) * 0.7
     return round(good - bad, 2)

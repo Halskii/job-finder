@@ -152,7 +152,7 @@ def iter_urls(crawl: str, pattern: str, pause: float = 2.0):
                 continue
 
 
-def resolve_ids(root: Path, crawls: int, log=print) -> list[str] | None:
+def resolve_ids(root: Path, crawls: int) -> list[str] | None:
     """The newest crawls' names, remembered in the cache. When the list cannot be loaded, the remembered one is used;
     None when there is neither."""
     cache = load_cache(root)
@@ -186,7 +186,7 @@ def enumerate_candidates(root: Path, systems: list[str], crawls: int, log=print,
     crawl_cache.json, so running again only reads newer ones."""
     cache = load_cache(root)
     if ids is None:
-        ids = resolve_ids(root, crawls, log) or []
+        ids = resolve_ids(root, crawls) or []
     cache = load_cache(root)
     for system in systems:
         found = cache["found"].setdefault(system, [])

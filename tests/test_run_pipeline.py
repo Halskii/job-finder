@@ -311,6 +311,47 @@ class CollectBoardsTests(unittest.TestCase):
         self.assertLessEqual(state["peak"], 4)
 
 
+class PlatformSwitchTests(unittest.TestCase):
+    """`platforms:` in config.yaml turns a whole board platform off without removing its boards."""
+
+    CFG = {"sources": {"greenhouse": ["g1"], "lever": ["l1"], "workday": [{"name": "W", "host": "h", "tenant": "t", "site": "s"}]},
+           "request_delay": 0, "fetch_workers": 2, "workday_workers": 2, "titles": ["Software Engineer"],
+           "feeds": {}, "government": {"usajobs": {"enabled": False}, "texas_hhs": {"enabled": False}}}
+
+    def collect(self, platforms):
+        out, calls = io.StringIO(), []
+
+        def fetcher(kind):
+            def fn(*args, **kwargs):
+                calls.append(kind)
+                return [job(f"{kind}:1", company=kind)]
+            return fn
+
+        cfg = {**self.CFG, **({"platforms": platforms} if platforms is not None else {})}
+        with mock.patch.object(sources, "fetch_greenhouse", fetcher("gh")), mock.patch.object(sources, "fetch_lever", fetcher("lv")), \
+                mock.patch.object(sources, "fetch_workday", fetcher("wd")), redirect_stdout(out):
+            jobs = main.collect(cfg, None)
+        return jobs, calls, out.getvalue()
+
+    def test_everything_is_on_when_the_section_is_missing_or_a_platform_is_not_listed(self):
+        for platforms in (None, {}, {"ashby": False}):
+            jobs, calls, _ = self.collect(platforms)
+            self.assertEqual(sorted(calls), ["gh", "lv", "wd"])
+
+    def test_a_platform_set_to_false_is_not_fetched_and_says_so(self):
+        jobs, calls, out = self.collect({"lever": False, "workday": False})
+        self.assertEqual(calls, ["gh"])
+        self.assertEqual([j.id for j in jobs], ["gh:1"])
+        self.assertIn("lever", out)
+        self.assertIn("turned off", out)
+        self.assertIn("workday", out)
+
+    def test_an_unknown_platform_name_is_reported_not_silently_ignored(self):
+        jobs, calls, out = self.collect({"greenhous": False})
+        self.assertEqual(sorted(calls), ["gh", "lv", "wd"])
+        self.assertIn("'greenhous' is not a platform name", out)
+
+
 class ScoringTests(PipelineBase):
     """Claude scoring runs in several threads; results are stored by the main thread."""
 
