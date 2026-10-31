@@ -356,7 +356,8 @@ def cmd_run(args, cfg, profile, conn) -> None:
         if not filters.age_ok(job.posted, cfg.get("max_age_days", 30)):
             stats["age"] += 1
             continue
-        if not filters.pay_ok(job.pay_max, job.pay_min, cfg.get("min_pay", 0)):
+        sources.fill_pay(job)   # no yearly pay listed? take an hourly rate if the posting gives one
+        if not filters.pay_ok(job.pay_max, job.pay_min, cfg.get("min_pay", 0), job.pay_unit):
             stats["pay"] += 1
             continue
         if db.add_job(conn, job, filters.quick_score(job.description, profile)):
@@ -420,11 +421,6 @@ def visible(rows, loc_excl) -> list:
     return [r for r in rows if filters.exclusion_ok(r["location"], loc_excl)]
 
 
-def money(v) -> str:
-    """A pay figure for the report, or "?" when the posting did not list one."""
-    return f"${v:,}" if v else "?"
-
-
 def write_report(conn, cfg) -> Path | None:
     """Write reports/<today>.md with the best scored jobs, highest score first. Rerunning on the same day overwrites it."""
     scfg = cfg.get("scoring", {})
@@ -441,7 +437,7 @@ def write_report(conn, cfg) -> Path | None:
         a = json.loads(r["analysis"] or "{}")
         lines += [
             f"## {r['score']} | {r['title']} at {r['company']}",
-            f"- Location: {r['location'] or 'n/a'} | Pay: {money(r['pay_min'])} - {money(r['pay_max'])} | Posted: {r['posted'] or 'unknown'}",
+            f"- Location: {r['location'] or 'n/a'} | Pay: {sources.pay_label(r['pay_min'], r['pay_max'], r['pay_unit'])} | Posted: {r['posted'] or 'unknown'}",
             f"- Verdict: **{r['verdict']}** | {a.get('reason', '')}",
             f"- Matched: {', '.join(a.get('matched', [])) or 'n/a'}",
             f"- Missing required: {', '.join(a.get('missing_required', [])) or 'none noted'}",
@@ -595,6 +591,17 @@ def cmd_profile(args, cfg, profile, conn) -> None:
     log("profile.json updated (previous version saved as profile.json.bak).")
 
 
+def cmd_reformat(args, cfg, profile, conn) -> None:
+    """Restore the headings, bullets and bold of postings that were stored as plain text, asking each one's source again."""
+    import reformat
+    waiting = conn.execute("SELECT COUNT(*) FROM jobs WHERE (formatted IS NULL OR formatted=0)").fetchone()[0]
+    log(f"{waiting} postings are stored as plain text; asking their sources again (one request at a time)...")
+    counts = reformat.restore_all(conn, delay=cfg.get("request_delay", 0.4),
+                                  progress=lambda done, total: log(f"  {done}/{total}") if done % 25 == 0 or done == total else None)
+    log(f"Restored {counts['restored']}, no longer online {counts['gone']}, to retry later {counts['failed']}. "
+        f"Sources that cannot look up one posting keep their plain text.")
+
+
 def cmd_mark(args, cfg, profile, conn) -> None:
     if args.status not in STATUSES:
         sys.exit(f"status must be one of: {', '.join(sorted(STATUSES))}")
@@ -630,6 +637,7 @@ def main() -> None:
     c.add_argument("--keep-all", action="store_true", help="keep every live board, not only those with a posting matching your titles")
     c.add_argument("--recheck", action="store_true", help="ask boards that were checked recently again")
     c.add_argument("--add", action="store_true", help="save the boards it finds")
+    sub.add_parser("reformat", help="restore the formatting of postings stored as plain text (the viewer also does this in the background)")
     w = sub.add_parser("workday-add", help="add a Workday careers site from its web address")
     w.add_argument("url")
     w.add_argument("--name", help="label to show for the company")
@@ -645,7 +653,7 @@ def main() -> None:
     conn = db.connect(str(ROOT / "jobs.db"))
     # Every command takes the same four arguments, even those that ignore some of them.
     {"run": cmd_run, "list": cmd_list, "mark": cmd_mark, "profile": cmd_profile,
-     "discover": cmd_discover, "workday-add": cmd_workday_add, "crawl": cmd_crawl}[args.cmd](args, cfg, profile, conn)
+     "discover": cmd_discover, "workday-add": cmd_workday_add, "crawl": cmd_crawl, "reformat": cmd_reformat}[args.cmd](args, cfg, profile, conn)
 
 
 if __name__ == "__main__":

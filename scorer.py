@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import json
 
+import sources
+
 SYSTEM = """You are a strict, honest job-fit analyst for one candidate. You are given the candidate's VERIFIED profile
 and a job posting. Rules:
 - Treat ONLY facts in the profile as true. Anything in "do_not_assume", or not mentioned at all, is something the candidate
@@ -33,9 +35,11 @@ def score_job(client, model: str, profile: dict, job, min_pay: int, resume_text:
     """Ask Claude how well one stored job (a database row) fits the profile. Returns the parsed answer plus the token
     counts under `_in` / `_out`, which the caller uses to estimate cost."""
     description = (job["description"] or "")[:7000]   # long postings are cut to keep each call cheap
-    pay = "unknown"
-    if job["pay_min"] or job["pay_max"]:
-        pay = f"{job['pay_min'] or '?'} - {job['pay_max'] or '?'}"
+    unit = job["pay_unit"] if "pay_unit" in job.keys() else "year"   # a stored job is a row; tests pass a dict
+    pay = sources.format_pay(job["pay_min"], job["pay_max"], unit) or "unknown"
+    if unit == "hour" and pay != "unknown":   # say what an hourly rate comes to in a year, so it can be compared with the minimum
+        yearly = [f"${round(v * sources.HOURS_PER_YEAR):,}" for v in dict.fromkeys(v for v in (job["pay_min"], job["pay_max"]) if v)]
+        pay += f" (about {' - '.join(yearly)} a year full-time)"
     resume_block = (f"CANDIDATE RESUME (context only; if it conflicts with the profile, the profile wins):\n{resume_text}\n\n"
                     if resume_text else "")
     user = (

@@ -31,6 +31,7 @@ class Job:
     description: str = ""
     pay_min: int | None = None
     pay_max: int | None = None
+    pay_unit: str = "year"            # "year", or "hour" when the posting gives an hourly rate (then pay_min / pay_max are dollars per hour)
     detail: dict = field(default_factory=dict)   # fetcher-private data (e.g. Workday detail URL)
 
 
@@ -161,6 +162,48 @@ def extract_pay(text: str) -> tuple[int | None, int | None]:
         if 30_000 <= lo <= hi <= 1_000_000:
             return lo, hi
     return None, None
+
+
+HOURS_PER_YEAR = 2080   # a full-time year, used to compare an hourly rate with a yearly minimum
+_RATE = r"(\d{1,3}(?:\.\d{1,2})?)"
+_PER_HOUR = r"(?:/\s?(?:hr|hour)\b|\s*(?:per|an|a)\s+hour\b|\s*hourly\b)"
+HOURLY_RANGE_RE = re.compile(r"\$\s?" + _RATE + r"\s*(?:" + _PER_HOUR + r")?\s*(?:-|\u2013|\u2014|to)\s*\$?\s?" + _RATE + r"\s*" + _PER_HOUR, re.I)
+HOURLY_ONE_RE = re.compile(r"\$\s?" + _RATE + r"\s*" + _PER_HOUR, re.I)
+
+
+def extract_hourly(text: str) -> tuple[float | None, float | None]:
+    """Find an hourly rate like $40/hr-45/hr, $50 - $65 per hour, or $22.50 an hour. A single rate comes back as both ends."""
+    t = re.sub(r"\s*USD\b", "", (text or "").replace("**", ""), flags=re.I)
+    found = [(float(m.group(1)), float(m.group(2))) for m in HOURLY_RANGE_RE.finditer(t)]
+    found += [(float(m.group(1)),) * 2 for m in HOURLY_ONE_RE.finditer(t)]
+    for lo, hi in found:
+        if 7 <= lo <= hi <= 500:
+            return (int(lo) if lo == int(lo) else lo), (int(hi) if hi == int(hi) else hi)
+    return None, None
+
+
+def fill_pay(job) -> None:
+    """If a posting listed no yearly pay but gives an hourly rate, store the hourly rate (and mark the unit)."""
+    if job.pay_min is None and job.pay_max is None:
+        lo, hi = extract_hourly(job.description)
+        if lo is not None:
+            job.pay_min, job.pay_max, job.pay_unit = lo, hi, "hour"
+
+
+def format_pay(lo, hi, unit: str = "year") -> str:
+    """Pay for people to read: '$92,000 - $147,000', '$40 - $45 / hr', or '' when the posting did not list any."""
+    def one(v) -> str:
+        return f"${v:,.2f}" if isinstance(v, float) and v != int(v) else f"${int(v):,}"
+    parts = [one(v) for v in dict.fromkeys(v for v in (lo, hi) if v)]
+    return (" - ".join(parts) + (" / hr" if unit == "hour" else "")) if parts else ""
+
+
+NOT_DISCLOSED = "Salary Non-Disclosed"
+
+
+def pay_label(lo, hi, unit: str = "year") -> str:
+    """Pay as shown to a person: the figures, or 'Salary Non-Disclosed' when the posting gave none."""
+    return format_pay(lo, hi, unit) or NOT_DISCLOSED
 
 
 _local = threading.local()

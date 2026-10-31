@@ -252,6 +252,22 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(job["description"], "Build <b>things</b>.")
         self.assertEqual(self.get("/api/job/nope")[0], 404)
 
+    def test_an_hourly_rate_shows_instead_of_question_marks(self):
+        conn = db.connect(str(viewer.DB_PATH))
+        db.add_job(conn, sources.Job("gh:hourly:1", "greenhouse", "Hourly Co", "DevOps Engineer", "Redmond, WA", "https://example.com/h",
+                                     description="Range $40/hr-45/hr", pay_min=40, pay_max=45, pay_unit="hour"), 1.0)
+        conn.close()
+        report = viewer.REPORTS / "2026-10-31.md"
+        report.write_text("# Job matches, 2026-10-31\n\n## 92 | DevOps Engineer at Hourly Co\n- Location: Redmond, WA | Pay: ? - ? | Posted: 2026-10-22\n"
+                          "- Verdict: **apply** | Fits.\n- Link: https://example.com/h\n- ID: `gh:hourly:1`\n", encoding="utf-8")
+        try:
+            job = json.loads(self.get("/api/report/2026-10-31.md")[1])["jobs"][0]
+            self.assertEqual(job["pay"], "$40 - $45 / hr")             # the stored rate, not the report's "? - ?"
+            self.assertEqual(json.loads(self.get("/api/job/gh%3Ahourly%3A1")[1])["pay"], "$40 - $45 / hr")
+            self.assertEqual(json.loads(self.get("/api/job/greenhouse%3Astripe%3A1")[1])["pay"], "Salary Non-Disclosed")   # no pay listed
+        finally:
+            report.unlink()
+
     def test_tailor_endpoint(self):
         from unittest import mock
         self.assertEqual(self.post("/api/tailor", {"id": "x"}, ctype="text/plain")[0], 400)
