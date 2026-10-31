@@ -14,13 +14,14 @@ exclude_locations: []
 request_delay: 0.4        # seconds between HTTP requests (be polite to job boards)
 
 profile_model: claude-sonnet-5-5   # used by `main.py profile` to read resume.pdf
+tailor_model: claude-fable-5-1     # used by the viewer's "Tailor resume + cover letter" button
 
 scoring:
   model: claude-haiku-4-5-20251001   # cheap first pass; switch to claude-sonnet-5-5 for deeper analysis
   max_per_run: 40                    # cap LLM calls per run to control cost
   workers: 8                          # scoring calls made at the same time (lower this if you see rate-limit errors)
   report_min_score: 60               # only show jobs scoring at least this in the report
-  report_size: 25
+  report_size: 1000
   price_per_million_tokens: {input: 1.0, output: 5.0}   # USD for the scoring model above; edit if prices change
 
 # Job titles to look for. Level markers (I, II, III, Associate, Junior) are stripped automatically,

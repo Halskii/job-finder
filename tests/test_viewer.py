@@ -143,6 +143,40 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(self.post("/api/mark", {"id": "x", "status": "saved"}, ctype="text/plain")[0], 400)
 
 
+    def test_tailor_endpoint(self):
+        from unittest import mock
+        self.assertEqual(self.post("/api/tailor", {"id": "x"}, ctype="text/plain")[0], 400)
+        self.assertEqual(self.post("/api/tailor", {})[0], 400)
+        with mock.patch.object(viewer, "tailor_for", return_value={"files": ["a.pdf"]}) as f:
+            self.assertEqual(self.post("/api/tailor", {"id": "greenhouse:stripe:1"}), (200, {"files": ["a.pdf"]}))
+            f.assert_called_once_with("greenhouse:stripe:1", "", "")
+        with mock.patch.object(viewer, "tailor_for", return_value={"files": []}) as f:   # the optional requests are passed along, capped
+            self.post("/api/tailor", {"id": "x", "resume_request": "lead with k8s", "letter_request": "y" * 5000})
+            f.assert_called_once_with("x", "lead with k8s", "y" * 2000)
+        with mock.patch.object(viewer, "tailor_for", return_value={"files": []}) as f:   # hidden and control characters never reach the model
+            self.post("/api/tailor", {"id": "x", "resume_request": "a\x00b\u202ec", "letter_request": "ok"})
+            f.assert_called_once_with("x", "abc", "ok")
+        with mock.patch.object(viewer, "tailor_for", side_effect=LookupError("no such job")):
+            self.assertEqual(self.post("/api/tailor", {"id": "nope"})[0], 404)
+        with mock.patch.object(viewer, "tailor_for", side_effect=RuntimeError("No ANTHROPIC_API_KEY found")):
+            status, body = self.post("/api/tailor", {"id": "x"})
+            self.assertEqual(status, 500)
+            self.assertIn("No ANTHROPIC_API_KEY", body["error"])
+        with viewer._tailoring:   # a tailoring already running
+            self.assertEqual(self.post("/api/tailor", {"id": "x"})[0], 409)
+
+
+    def test_a_negative_content_length_does_not_hang_the_server(self):
+        import http.client
+        conn = http.client.HTTPConnection("127.0.0.1", self.srv.server_address[1], timeout=5)
+        conn.putrequest("POST", "/api/tailor")
+        conn.putheader("Content-Type", "application/json")
+        conn.putheader("Content-Length", "-1")
+        conn.endheaders()
+        self.assertEqual(conn.getresponse().status, 400)
+        conn.close()
+
+
 class RoundTripTests(unittest.TestCase):
     def test_write_report_output_parses_back(self):
         with tempfile.TemporaryDirectory() as tmp:

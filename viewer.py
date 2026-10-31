@@ -8,6 +8,7 @@ import argparse
 import json
 import re
 import sys
+import threading
 import webbrowser
 from datetime import date
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -15,6 +16,7 @@ from pathlib import Path
 from urllib.parse import unquote, urlparse
 
 import db
+import tailor
 
 ROOT = Path(__file__).parent
 REPORTS = ROOT / "reports"
@@ -142,6 +144,17 @@ def load_tracker() -> dict:
         conn.close()
 
 
+_tailoring = threading.Lock()   # one tailoring at a time: each one is a paid API call
+
+
+def tailor_for(job_id: str, resume_request: str = "", letter_request: str = "") -> dict:
+    conn = db.connect(str(DB_PATH))
+    try:
+        return tailor.tailor_job(conn, job_id, resume_request=resume_request, letter_request=letter_request)
+    finally:
+        conn.close()
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "JobViewer"
 
@@ -166,6 +179,19 @@ class Handler(BaseHTTPRequestHandler):
     def _json(self, code: int, obj) -> None:
         self._send(code, json.dumps(obj).encode("utf-8"), "application/json; charset=utf-8")
 
+    def _tailor(self, job_id: str, resume_request: str, letter_request: str) -> None:
+        """Make the tailored resume and cover letter for one job. Takes a minute or two, since it waits on the model."""
+        if not _tailoring.acquire(blocking=False):
+            return self._json(409, {"error": "Already working on another job. Wait for it to finish."})
+        try:
+            self._json(200, tailor_for(job_id, resume_request, letter_request))
+        except LookupError:
+            self._json(404, {"error": "no such job"})
+        except Exception as ex:   # missing key or resume, no browser for the PDF, a failed API call: show the reason on the page
+            self._json(500, {"error": f"{type(ex).__name__}: {str(ex)[:300]}"})
+        finally:
+            _tailoring.release()
+
     def do_GET(self) -> None:
         """Serve the page and the read-only JSON endpoints it loads its data from."""
         if not self._host_ok():
@@ -183,22 +209,24 @@ class Handler(BaseHTTPRequestHandler):
         self._json(404, {"error": "not found"})
 
     def do_POST(self) -> None:
-        """The two writes the page can make: change a job's status, or the date of an application."""
+        """The writes the page can make: change a job's status, change the date of an application, or write a tailored resume and cover letter."""
         if not self._host_ok():
             return self._json(403, {"error": "bad host"})
         # Requiring JSON means a web page on another origin can't send this without a CORS preflight, which we never grant.
         path = urlparse(self.path).path
-        if path not in ("/api/mark", "/api/applied-date") or "application/json" not in (self.headers.get("Content-Type") or ""):
+        if path not in ("/api/mark", "/api/applied-date", "/api/tailor") or "application/json" not in (self.headers.get("Content-Type") or ""):
             return self._json(400, {"error": "bad request"})
         try:
-            body = json.loads(self.rfile.read(min(int(self.headers.get("Content-Length") or 0), 10_000)))
+            body = json.loads(self.rfile.read(max(0, min(int(self.headers.get("Content-Length") or 0), 40_000))))   # room for two 2,000-character requests, even all non-ASCII
             job_id = str(body["id"])
             if path == "/api/mark":
                 status = str(body["status"])
-            else:
+            elif path == "/api/applied-date":
                 day = parse_day(body["date"])
         except (ValueError, KeyError, TypeError):
             return self._json(400, {"error": "bad request"})
+        if path == "/api/tailor":
+            return self._tailor(job_id, tailor.clean_request(body.get("resume_request")), tailor.clean_request(body.get("letter_request")))
         if path == "/api/applied-date":
             if day is None:
                 return self._json(400, {"error": "date must be a real day, YYYY-MM-DD, not in the future"})
@@ -260,9 +288,31 @@ td select.s-rejected{border-color:var(--bad);color:var(--bad)}td select.s-withdr
 td input[type=date]{padding:4px 6px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink);font:inherit}
 td a{color:var(--accent)}
 .muted{color:var(--mute)}
+dialog{border:1px solid var(--line);border-radius:10px;background:var(--panel);color:var(--ink);padding:20px 22px;width:min(560px,92vw)}
+dialog::backdrop{background:rgba(0,0,0,.4)}
+dialog h3{margin:0 0 4px;font-size:18px}dialog label{display:block;font-weight:600;margin:14px 0 4px}
+dialog textarea{width:100%;min-height:84px;padding:8px 10px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink);font:inherit;resize:vertical}
+dialog .count{text-align:right;font-size:12px;margin-top:2px}
+dialog .actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}
+.btn:disabled{cursor:progress}
+.spinner{display:inline-block;width:14px;height:14px;border:2px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite;vertical-align:-2px}
+@keyframes spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.spinner{animation-duration:2.4s}}
 @media (max-width:760px){body{flex-direction:column;height:auto}nav{width:auto;max-height:45vh}main{padding:16px}}
 </style></head><body>
 <nav><header><div class="tabs"><a class="tab" id="tab-matches" href="#">Matches</a><a class="tab" id="tab-tracker" href="#tracker">Tracker <span id="tcount"></span></a></div><select id="report" aria-label="Report"></select><input id="q" placeholder="Filter by title or company" aria-label="Filter"></header><div id="list"></div></nav>
+<dialog id="tailor-dlg"><form method="dialog">
+<h3>Tailor resume + cover letter</h3><div class="muted" id="tailor-for"></div>
+<div class="muted" style="margin-top:8px">Both boxes are optional. Leave them empty to use the defaults. Your requests are followed as long as they stay true to your resume and profile.</div>
+<label for="tailor-resume">Resume request (optional)</label>
+<textarea id="tailor-resume" maxlength="2000" placeholder="e.g. Lead with my Kubernetes work and keep the skills section short"></textarea>
+<div class="muted count" id="tailor-resume-n"></div>
+<label for="tailor-letter">Cover letter request (optional)</label>
+<textarea id="tailor-letter" maxlength="2000" placeholder="e.g. Mention that I am open to relocating, and keep it under 250 words"></textarea>
+<div class="muted count" id="tailor-letter-n"></div>
+<div class="muted" style="margin-top:10px;font-size:12px">Up to 2,000 characters in each box, plain text only. Control and invisible characters are removed.</div>
+<div class="actions"><button class="btn" value="cancel">Cancel</button><button class="btn primary" value="ok">Tailor</button></div>
+</form></dialog>
 <main id="main"><div class="empty">Select a job from the list.</div></main>
 <script>
 const $=s=>document.querySelector(s);
@@ -323,16 +373,19 @@ function route(){
   }else{
     buttons.append(el("button",{className:"btn apply",textContent:"Mark as applied",title:"Adds this job to the tracker with today's date",onclick:()=>setStatus(j,"applied",true)}));
   }
+  const note=el("div",{className:"muted",id:"tailor-note",style:"margin:-4px 0 8px"});
+  const tailorBtn=el("button",{className:"btn",id:"tailor-btn",textContent:TAILOR_LABEL,title:"Uses Claude (Fable 5.1) to rewrite your resume for this posting and write a cover letter, saved as PDFs in the Optimized Resumes folder. Costs a few cents to under a dollar.",onclick:()=>askTailor(j)});
+  buttons.append(tailorBtn);
   ["saved","skipped","interview"].forEach(s=>buttons.append(el("button",{className:"btn"+(j.status===s?" on":""),textContent:s,onclick:()=>setStatus(j,s)})));
   const card=el("div",{className:"card"},
     el("h1",{textContent:j.title}),el("p",{className:"sub",textContent:j.company+(meta?"  ·  "+meta:"")}),
     el("div",{},el("span",{className:"verdict "+(j.verdict||""),textContent:(j.verdict||"")+" "+j.score}),el("span",{textContent:j.reason||""})),
-    buttons,
+    buttons,note,
     ...list("Matched",j.matched,"good"),...list("Missing required",j.missing_required,"bad"),...list("Dealbreakers",j.dealbreakers,"bad"),
     ...(j.resume_angle?[el("h2",{textContent:"Resume angle"}),el("div",{textContent:j.resume_angle})]:[]),
     el("h2",{textContent:"Posting"}),
     el("div",{id:"desc",textContent:j.description||"No stored description. Use the button above to read the original posting."}));
-  $("#main").replaceChildren(card);$("#main").scrollTop=0;
+  $("#main").replaceChildren(card);$("#main").scrollTop=0;paintTailor(j.id);
 }
 const post=(path,body)=>api(path,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
 async function setStatus(j,status,explicit){
@@ -342,6 +395,50 @@ async function setStatus(j,status,explicit){
     const res=await post("/api/mark",{id:j.id,status});
     j.status=status;j.applied_at=res.applied_at;renderList();route();refreshTracker();
   }catch(e){alert("Could not update status: "+e.message)}
+}
+const TAILOR_LABEL="Tailor resume + cover letter";
+const REQUEST_MAX=2000;
+const BAD_CHARS=/[\u0000-\u0008\u000B-\u001F\u007F-\u009F\u00AD\u200B-\u200F\u2028-\u202E\u2060-\u206F\uE000-\uF8FF\uFEFF\uFFF0-\uFFFF]/g;   // control, invisible, direction-override, private-use
+function wireRequestBox(id){
+  const ta=$("#"+id),n=$("#"+id+"-n");
+  const update=()=>{
+    const clean=ta.value.replace(BAD_CHARS,"").slice(0,REQUEST_MAX);
+    if(clean!==ta.value)ta.value=clean;
+    n.textContent=ta.value.length.toLocaleString()+" / "+REQUEST_MAX.toLocaleString();
+  };
+  ta.addEventListener("input",update);update();return update;
+}
+const requestBoxes=[wireRequestBox("tailor-resume"),wireRequestBox("tailor-letter")];
+const tailorState={};   // job id -> {running, width, message}; kept here so it survives leaving the job's page and coming back
+function paintTailor(id){
+  const btn=$("#tailor-btn"),note=$("#tailor-note");
+  if(!btn||decodeURIComponent(location.hash.slice(1))!==id)return;   // some other job is on screen
+  const st=tailorState[id]||{};
+  btn.disabled=!!st.running;
+  if(st.running){
+    btn.style.minWidth=st.width+"px";   // keep the button the same size while it shows the spinner
+    btn.replaceChildren(el("span",{className:"spinner"}));btn.setAttribute("aria-label","Working, this takes a minute or two");
+  }else{btn.textContent=TAILOR_LABEL;btn.style.minWidth="";btn.removeAttribute("aria-label")}
+  note.textContent=st.message||"";
+}
+function askTailor(j){
+  const dlg=$("#tailor-dlg");
+  $("#tailor-for").textContent=j.title+" at "+j.company;$("#tailor-resume").value="";$("#tailor-letter").value="";requestBoxes.forEach(f=>f());
+  dlg.querySelector("form").onsubmit=e=>{if(e.submitter&&e.submitter.value==="ok")tailorJob(j,$("#tailor-resume").value.trim(),$("#tailor-letter").value.trim())};
+  dlg.showModal();$("#tailor-resume").focus();
+}
+async function tailorJob(j,resume_request,letter_request){
+  const btn=$("#tailor-btn");
+  tailorState[j.id]={running:true,width:btn?btn.offsetWidth:206,message:""};paintTailor(j.id);
+  let message;
+  try{
+    const r=await fetch("/api/tailor",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({id:j.id,resume_request,letter_request})});
+    const d=await r.json();
+    if(!r.ok)throw new Error(d.error||r.status);
+    const long=Object.entries(d.pages).filter(([k,n])=>n>1).map(([k])=>k.replace("_"," "));
+    message="Saved to Optimized Resumes: "+d.files.join(", ")+(long.length?" (the "+long.join(" and ")+" runs past one page; trim it before sending)":"");
+  }catch(e){message="Could not tailor: "+e.message}
+  tailorState[j.id]={running:false,message};paintTailor(j.id);
 }
 async function reloadJobs(){if(reportName)await openReport(reportName)}
 async function refreshTracker(){
