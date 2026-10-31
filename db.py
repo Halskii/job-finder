@@ -15,6 +15,11 @@ CREATE TABLE IF NOT EXISTS jobs (
   status TEXT DEFAULT 'new', first_seen REAL, notes TEXT
 );
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
+CREATE TABLE IF NOT EXISTS interview_rounds (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, job_id TEXT NOT NULL, kind TEXT NOT NULL, round_date TEXT,
+  outcome TEXT NOT NULL DEFAULT 'scheduled', notes TEXT DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS interview_tips (job_id TEXT PRIMARY KEY, content TEXT NOT NULL, model TEXT, created TEXT);
 """
 
 
@@ -38,6 +43,8 @@ def _migrate(conn) -> None:
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(jobs)")}
     if "dedupe_key" not in cols:
         conn.execute("ALTER TABLE jobs ADD COLUMN dedupe_key TEXT")
+    if "formatted" not in cols:   # 1 when the description keeps the posting's headings and bullets; old rows are plain text
+        conn.execute("ALTER TABLE jobs ADD COLUMN formatted INTEGER DEFAULT 0")
     if "applied_at" not in cols:   # the day you applied, as YYYY-MM-DD; NULL means not applied
         conn.execute("ALTER TABLE jobs ADD COLUMN applied_at TEXT")
     for r in conn.execute("SELECT id, company, title FROM jobs WHERE dedupe_key IS NULL").fetchall():
@@ -67,7 +74,7 @@ def add_job(conn, job, quick: float) -> bool:
     """Store a posting. False when its id is already there, so a job seen on an earlier run is never added twice."""
     cur = conn.execute(
         "INSERT OR IGNORE INTO jobs (id, source, company, title, location, url, posted, pay_min, pay_max,"
-        " description, quick_score, first_seen, dedupe_key) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        " description, quick_score, first_seen, dedupe_key, formatted) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,1)",
         (job.id, job.source, job.company, job.title, job.location, job.url, job.posted,
          job.pay_min, job.pay_max, job.description, quick, time.time(), dedupe_key(job.company, job.title)),
     )
@@ -95,6 +102,11 @@ def top(conn, n: int, min_score: int):
         "SELECT * FROM jobs WHERE score IS NOT NULL AND score>=? AND status IN ('new','saved')"
         " ORDER BY score DESC, quick_score DESC LIMIT ?", (min_score, n)
     ).fetchall()
+
+
+def saved(conn):
+    """Every job you saved to look at later, best score first, whichever report it came from."""
+    return conn.execute("SELECT * FROM jobs WHERE status='saved' ORDER BY score DESC, first_seen DESC").fetchall()
 
 
 # Statuses that mean "I applied": a job that moves on to an interview, offer, or rejection was still applied to.
@@ -138,6 +150,71 @@ def applications(conn) -> list:
     return conn.execute(
         "SELECT id, company, title, location, url, status, notes, applied_at FROM jobs WHERE applied_at IS NOT NULL"
         " ORDER BY applied_at DESC, first_seen DESC").fetchall()
+
+
+ROUND_OUTCOMES = ("scheduled", "waiting", "passed", "rejected")
+
+
+def add_round(conn, job_id: str, kind: str = "", day: str | None = None, outcome: str = "scheduled", notes: str = "") -> int:
+    """Add an interview round to a job and return its id. A blank name becomes 'Round N', N counting the job's rounds."""
+    if not kind:
+        n = conn.execute("SELECT COUNT(*) FROM interview_rounds WHERE job_id=?", (job_id,)).fetchone()[0]
+        kind = f"Round {n + 1}"
+    cur = conn.execute("INSERT INTO interview_rounds (job_id, kind, round_date, outcome, notes) VALUES (?,?,?,?,?)",
+                       (job_id, kind, day, outcome, notes))
+    conn.commit()
+    return cur.lastrowid
+
+
+def update_round(conn, round_id: int, kind: str, day: str | None, outcome: str, notes: str) -> int:
+    cur = conn.execute("UPDATE interview_rounds SET kind=?, round_date=?, outcome=?, notes=? WHERE id=?",
+                       (kind, day, outcome, notes, round_id))
+    conn.commit()
+    return cur.rowcount
+
+
+def delete_round(conn, round_id: int) -> int:
+    cur = conn.execute("DELETE FROM interview_rounds WHERE id=?", (round_id,))
+    conn.commit()
+    return cur.rowcount
+
+
+def rounds_for(conn, job_id: str) -> list:
+    """One job's interview rounds in the order they were added."""
+    return [dict(r) for r in conn.execute(
+        "SELECT id, kind, round_date AS date, outcome, notes FROM interview_rounds WHERE job_id=? ORDER BY id", (job_id,))]
+
+
+def rounds_by_job(conn) -> dict:
+    """Every job's rounds, as {job id: [round, ...]}, in the order they were added."""
+    out: dict = {}
+    for r in conn.execute("SELECT id, job_id, kind, round_date AS date, outcome, notes FROM interview_rounds ORDER BY id"):
+        out.setdefault(r["job_id"], []).append({k: r[k] for k in ("id", "kind", "date", "outcome", "notes")})
+    return out
+
+
+def get_tips(conn, job_id: str) -> dict | None:
+    """The interview tips saved for a job, or None."""
+    r = conn.execute("SELECT content, model, created FROM interview_tips WHERE job_id=?", (job_id,)).fetchone()
+    return {"content": json.loads(r["content"]), "model": r["model"], "created": r["created"]} if r else None
+
+
+def trashed(conn):
+    """Every job you discarded (status 'skipped'), best score first. Discarded jobs stay out of reports until restored."""
+    return conn.execute("SELECT * FROM jobs WHERE status='skipped' ORDER BY score DESC, first_seen DESC").fetchall()
+
+
+def jobs_with_tips(conn) -> list:
+    """Every job that has saved interview prep, newest prep first."""
+    return conn.execute("SELECT jobs.*, t.created AS prep_created FROM jobs JOIN interview_tips t ON t.job_id = jobs.id"
+                        " ORDER BY t.created DESC, jobs.score DESC").fetchall()
+
+
+def save_tips(conn, job_id: str, content: dict, model: str, created: str) -> None:
+    conn.execute("INSERT INTO interview_tips (job_id, content, model, created) VALUES (?,?,?,?) ON CONFLICT(job_id) DO UPDATE SET"
+                 " content=excluded.content, model=excluded.model, created=excluded.created",
+                 (job_id, json.dumps(content), model, created))
+    conn.commit()
 
 
 def application_stats(conn, today: date | None = None) -> dict:

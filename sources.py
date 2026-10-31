@@ -6,6 +6,7 @@ sites that forbid it. Every fetcher returns a list of Job objects and never rais
 from __future__ import annotations
 
 import html
+from html.parser import HTMLParser
 import re
 import threading
 import time
@@ -34,14 +35,114 @@ class Job:
 
 
 # ----------------------------------------------------------------------------- helpers
-def strip_html(text: str) -> str:
+class _Markdown(HTMLParser):
+    """HTML to light Markdown: headings as '## ' / '### ', list items as '- ', bold as '**', paragraphs separated by a blank line.
+    Links, images, tables, colours and fonts are dropped and only their text stays."""
+    HEADINGS = {"h1": "## ", "h2": "## ", "h3": "### ", "h4": "### ", "h5": "### ", "h6": "### "}
+    PARAGRAPHS = {"p", "ul", "ol", "table", "blockquote", "pre"}   # a blank line before and after
+    LINES = {"div", "section", "article", "header", "footer", "tr"}   # a line break before and after
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.out: list[str] = []
+        self.skip = 0    # inside <script> or <style>
+        self.depth = 0   # list nesting
+        self.li = 0      # inside a list item
+
+    def newlines(self, n: int) -> None:
+        tail = "".join(self.out[-3:])
+        have = len(tail) - len(tail.rstrip("\n"))
+        if self.out and have < n:
+            self.out.append("\n" * (n - have))
+
+    def space(self) -> None:
+        if self.out and self.out[-1][-1:] not in "\n ":
+            self.out.append(" ")
+
+    def handle_starttag(self, tag, attrs) -> None:
+        if tag in ("script", "style"):
+            self.skip += 1
+        elif tag in self.HEADINGS:
+            self.newlines(2)
+            self.out.append(self.HEADINGS[tag])
+        elif tag in ("ul", "ol"):
+            self.depth += 1
+            self.newlines(1 if self.depth > 1 else 2)
+        elif self.li and (tag in self.PARAGRAPHS or tag in self.LINES):   # <li><div><p>text</p></div></li> is still one bullet
+            self.space()
+        elif tag in self.PARAGRAPHS:
+            self.newlines(2)
+        elif tag in self.LINES:
+            self.newlines(1)
+        elif tag == "br":
+            self.out.append("\n")
+        elif tag == "li":
+            self.li += 1
+            self.newlines(1)
+            self.out.append("  " * max(self.depth - 1, 0) + "- ")
+        elif tag in ("strong", "b"):
+            self.out.append("**")
+
+    def handle_endtag(self, tag) -> None:
+        if tag in ("script", "style"):
+            self.skip = max(0, self.skip - 1)
+        elif tag in self.HEADINGS:
+            self.newlines(2)
+        elif tag in ("ul", "ol"):
+            self.depth = max(0, self.depth - 1)
+            self.newlines(1 if self.depth else 2)
+        elif tag == "li":
+            self.li = max(0, self.li - 1)
+            self.newlines(1)
+        elif self.li and (tag in self.PARAGRAPHS or tag in self.LINES):
+            self.space()
+        elif tag in self.PARAGRAPHS:
+            self.newlines(2)
+        elif tag in self.LINES:
+            self.newlines(1)
+        elif tag in ("strong", "b"):
+            self.out.append("**")
+
+    def handle_data(self, data) -> None:
+        if self.skip:
+            return
+        text = re.sub(r"\s+", " ", data.replace("\xa0", " "))
+        prev = self.out[-1][-1:] if self.out else "\n"
+        if prev in "\n " and text.startswith(" "):
+            text = text.lstrip(" ")
+        if text:
+            self.out.append(text)
+
+    def markdown(self) -> str:
+        text = "".join(self.out)
+        text = re.sub(r"[ \t]+\n", "\n", text)
+        text = re.sub(r"\*\*\s*\*\*", " ", text)                     # empty bold
+        text = re.sub(r"^\s*\*\*\s*$", "", text, flags=re.M)            # a bold marker left alone on a line
+        lines = []
+        for line in text.split("\n"):
+            if line.startswith("#"):
+                line = line.replace("**", "")                           # a heading is already bold
+            if re.fullmatch(r"\s*(#+|-)\s*", line):                     # an empty heading or list item
+                line = ""
+            elif not re.match(r" *- ", line):                           # no stray indent, except a nested bullet's
+                line = line.lstrip(" ")
+            lines.append(line)
+        return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
+
+
+def strip_html(text: str, plain: bool = False) -> str:
+    """A posting's HTML as light Markdown (headings, bullets, bold, paragraphs), so the viewer can show it the way the
+    original was laid out. Text with no tags in it keeps its own line breaks. `plain=True` drops all of that, for the short
+    snippets some job APIs return (they put the search terms in bold, which is not the posting's own formatting)."""
     text = html.unescape(text or "")
-    text = re.sub(r"<(br|/p|/li|/div|/h\d)[^>]*>", "\n", text, flags=re.I)
-    text = re.sub(r"<[^>]+>", " ", text)
-    text = html.unescape(text)
-    text = re.sub(r"[ \t]+", " ", text)
-    text = re.sub(r"\n\s*\n+", "\n", text)
-    return text.strip()
+    if "<" not in text:
+        text = re.sub(r"[ \t]+", " ", text)
+        return re.sub(r"\n\s*\n+", "\n\n", text).strip()
+    parser = _Markdown()
+    parser.feed(text)
+    parser.close()
+    out = parser.markdown()
+    return re.sub(r"(?m)^(#+ |\s*- )", "", out).replace("**", "") if plain else out
 
 
 _AMOUNT = r"(\d{2,3}(?:,\d{3})+|\d{2,3}(?:\.\d+)?\s?[kK])"
@@ -55,7 +156,7 @@ def _amount(s: str) -> int:
 
 def extract_pay(text: str) -> tuple[int | None, int | None]:
     """Find the first plausible annual salary range like $120,000 - $160,000 or $120k-$160k."""
-    for m in PAY_RE.finditer(text or ""):
+    for m in PAY_RE.finditer((text or "").replace("**", "")):
         lo, hi = _amount(m.group(1)), _amount(m.group(2))
         if 30_000 <= lo <= hi <= 1_000_000:
             return lo, hi
@@ -108,9 +209,9 @@ def fetch_lever(slug: str) -> list[Job]:
     data = _get(f"https://api.lever.co/v0/postings/{slug}", params={"mode": "json"})
     jobs = []
     for j in data:
-        desc = j.get("descriptionPlain") or strip_html(j.get("description", ""))
+        desc = strip_html(j.get("description", "")) or j.get("descriptionPlain") or ""
         for lst in j.get("lists", []) or []:
-            desc += "\n" + (lst.get("text") or "") + "\n" + strip_html(lst.get("content", ""))
+            desc += "\n\n### " + (lst.get("text") or "").strip(": ") + "\n\n" + strip_html(lst.get("content", ""))
         lo = hi = None
         sr = j.get("salaryRange") or {}
         if sr.get("min") and sr.get("max") and (sr.get("interval") or "").lower().startswith("per-year"):
@@ -132,7 +233,7 @@ def fetch_ashby(slug: str) -> list[Job]:
     data = _get(f"https://api.ashbyhq.com/posting-api/job-board/{slug}", params={"includeCompensation": "true"})
     jobs = []
     for j in data.get("jobs", []):
-        desc = j.get("descriptionPlain") or strip_html(j.get("descriptionHtml", ""))
+        desc = strip_html(j.get("descriptionHtml", "")) or j.get("descriptionPlain") or ""
         lo = hi = None
         for comp in (j.get("compensation") or {}).get("summaryComponents", []) or []:
             if (comp.get("compensationType") or "").lower() == "salary" and (comp.get("interval") or "").lower().startswith("1 year"):

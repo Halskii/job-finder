@@ -19,6 +19,7 @@ from pathlib import Path
 import yaml
 
 import scorer
+from errors import BadModelAnswer, UserError
 
 ROOT = Path(__file__).parent
 OUT_DIR = ROOT / "Optimized Resumes"
@@ -53,6 +54,35 @@ Return ONLY a JSON object, no prose, with exactly these keys ("company_name" is 
  "cover_letter": {"paragraphs": [str]}}"""
 
 
+def make_client():
+    """An Anthropic client using the key in .env or the environment."""
+    import main
+    main.load_env()
+    key = os.environ.get("ANTHROPIC_API_KEY")
+    if not key:
+        raise UserError("No Anthropic API key found. Add ANTHROPIC_API_KEY to the .env file in the job-finder folder, then restart the viewer.", "no_api_key")
+    try:
+        import anthropic
+    except ImportError:
+        raise UserError("A package this feature needs (anthropic) is not installed for the Python running the viewer. "
+                        "Start the viewer with the project's virtual environment (.venv), or install requirements.txt.", "missing_package") from None
+    return anthropic.Anthropic(api_key=key, max_retries=6)
+
+
+def load_profile() -> dict:
+    """profile.json, or a UserError saying how to make it."""
+    path = ROOT / "profile.json"
+    if not path.exists():
+        raise UserError("profile.json was not found. Create it first (see the README), then try again.", "no_profile")
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def config_value(key: str, default: str) -> str:
+    """One top-level setting from config.yaml, or the default when the file or the setting is missing."""
+    cfg_file = ROOT / "config.yaml"
+    return ((yaml.safe_load(cfg_file.read_text(encoding="utf-8")) if cfg_file.exists() else None) or {}).get(key, default)
+
+
 def short(text: str, limit: int = 40) -> str:
     """Part of a name for use in a file name: cut at the first comma, bracket or dash, keep letters and digits only."""
     head = re.split(r"[,(\[\-–—|:/]", text or "")[0]
@@ -76,7 +106,7 @@ def check(data: dict) -> dict:
     except (KeyError, TypeError):
         ok = False
     if not ok:
-        raise ValueError("the model's answer was missing part of the resume or letter")
+        raise BadModelAnswer("Claude's resume and letter came back incomplete. Please try again.")
     return data
 
 
@@ -113,9 +143,9 @@ def ask(client, model: str, profile: dict, resume_text: str, row, resume_request
     msg = client.messages.create(model=model, max_tokens=16000, system=SYSTEM, output_config={"effort": "medium"},
                                  messages=[{"role": "user", "content": user}])
     if msg.stop_reason == "refusal":
-        raise RuntimeError("the model declined this request")
+        raise UserError("Claude declined to write this one. Try again, or change your request.", "refused")
     if msg.stop_reason == "max_tokens":
-        raise RuntimeError("the answer was cut off; try again")
+        raise UserError("Claude's answer was cut off before it finished. Please try again.", "cut_off")
     text = "".join(b.text for b in msg.content if b.type == "text")
     usage = getattr(msg, "usage", None)
     return check(scorer._extract_json(text)), int(getattr(usage, "input_tokens", 0) or 0), int(getattr(usage, "output_tokens", 0) or 0)
@@ -184,20 +214,26 @@ def find_browser() -> str:
         found = shutil.which(name)
         if found:
             return found
-    raise RuntimeError("Microsoft Edge or Google Chrome is needed to make the PDF, and neither was found.")
+    raise UserError("Making the PDF needs Microsoft Edge or Google Chrome, and neither was found on this computer.", "no_browser")
 
 
 def html_to_pdf(page: str, out: Path) -> None:
     """Print an HTML page to a PDF. A private browser profile keeps this from being handed to a browser you already have open."""
-    out.unlink(missing_ok=True)
+    try:
+        out.unlink(missing_ok=True)
+    except PermissionError:
+        raise UserError(f"Could not replace {out.name} because it is open in another program. Close it and try again.", "file_in_use") from None
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
         src = Path(tmp) / "page.html"
         src.write_text(page, encoding="utf-8")
-        subprocess.run([find_browser(), "--headless", "--disable-gpu", "--no-pdf-header-footer",
-                        f"--user-data-dir={Path(tmp) / 'profile'}", f"--print-to-pdf={out.resolve()}", src.as_uri()],
-                       check=True, capture_output=True, timeout=90)
+        try:
+            subprocess.run([find_browser(), "--headless", "--disable-gpu", "--no-pdf-header-footer",
+                            f"--user-data-dir={Path(tmp) / 'profile'}", f"--print-to-pdf={out.resolve()}", src.as_uri()],
+                           check=True, capture_output=True, timeout=90)
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+            raise UserError("The browser could not make the PDF (it stopped or took too long). Please try again.", "pdf_failed") from None
     if not out.exists():
-        raise RuntimeError("the browser did not write the PDF")
+        raise UserError("The PDF was not created. Please try again.", "pdf_failed")
 
 
 def page_count(pdf: Path) -> int:
@@ -225,20 +261,12 @@ def tailor_job(conn, job_id: str, out_dir: Path = OUT_DIR, client=None, resume_r
     row = conn.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
     if row is None:
         raise LookupError("no such job")
-    profile = json.loads((ROOT / "profile.json").read_text(encoding="utf-8"))
+    profile = load_profile()
     resume_text, raw = main.load_resume(), main.read_resume_file()
     if not resume_text:
-        raise RuntimeError("No resume found. Put resume.pdf (or resume.txt) in the project folder.")
-    if client is None:
-        main.load_env()
-        key = os.environ.get("ANTHROPIC_API_KEY")
-        if not key:
-            raise RuntimeError("No ANTHROPIC_API_KEY found (set it in .env).")
-        main.require_anthropic()
-        import anthropic
-        client = anthropic.Anthropic(api_key=key, max_retries=6)
-    cfg_file = ROOT / "config.yaml"
-    model = ((yaml.safe_load(cfg_file.read_text(encoding="utf-8")) if cfg_file.exists() else None) or {}).get("tailor_model", MODEL)
+        raise UserError("No resume found. Put your resume in the job-finder folder as resume.pdf (or resume.txt), then try again.", "no_resume")
+    client = client or make_client()
+    model = config_value("tailor_model", MODEL)
     data, tok_in, tok_out = ask(client, model, profile, resume_text, row, resume_request, letter_request)
 
     name = profile.get("name") or "Resume"

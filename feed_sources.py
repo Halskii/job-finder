@@ -226,7 +226,7 @@ def fetch_adzuna(app_id: str, app_key: str, terms: list[str], max_age_days: int 
                     continue
                 predicted = str(j.get("salary_is_predicted", "0")) == "1"
                 lo, hi = (None, None) if predicted else _salary(j.get("salary_min"), j.get("salary_max"))
-                desc = strip_html(j.get("description", ""))
+                desc = strip_html(j.get("description", ""), plain=True)   # Adzuna sends a short snippet with the search terms in bold
                 if lo is None and hi is None:
                     lo, hi = extract_pay(desc)
                 seen[jid] = Job(
@@ -253,7 +253,7 @@ def fetch_jooble(api_key: str, terms: list[str], pages: int = 2) -> list[Job]:
                 jid = str(j.get("id") or link)
                 if not link or jid in seen:
                     continue
-                desc = strip_html(j.get("snippet", ""))
+                desc = strip_html(j.get("snippet", ""), plain=True)   # likewise a snippet
                 lo, hi = extract_pay(j.get("salary") or "") if j.get("salary") else (None, None)
                 if lo is None and hi is None:
                     lo, hi = extract_pay(desc)
