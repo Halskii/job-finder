@@ -15,7 +15,8 @@ company job boards, remote feed, government sites
 
 1. `python main.py run` fetches, filters, scores, and writes today's report. (`--no-llm` fetches and filters without using any API credits.)
 2. `python viewer.py` opens the report in your browser. Click a job to read it, **Open original posting** to apply on the real page, then **Mark as applied** to log it.
-3. The **Tracker** tab shows how many places you have applied to this week, this month, and all time, and lets you update each one as you hear back.
+3. **Tailor resume + cover letter** on any job makes a resume and cover letter PDF for that posting (see below).
+4. The **Tracker** tab shows how many places you have applied to this week, this month, and all time, and lets you update each one as you hear back.
 
 ## How scoring works
 
@@ -124,6 +125,11 @@ Both are under `government:` in `config.yaml`; set `enabled: false` on one to tu
 - Sidebar: pick a report date, filter by title or company, click a job (or press `j` / `k` to move). Each job has its own address (`#id`), so back and forward work. The **Matches** and **Tracker** tabs at the top switch between the job pages and the application tracker.
 - Detail pane: score, verdict, matched and missing skills, resume angle, and the full stored posting text. **Open original posting** opens the real page in a new tab. Job sites generally forbid embedding their pages in another page, so the posting is shown from the saved copy instead.
 - **Mark as applied** adds the job to the application tracker with today's date (see below). `saved`, `skipped`, and `interview` set the job's status, same as `main.py mark`. Applied and skipped jobs drop out of future reports.
+- **Tailor resume + cover letter** writes a version of your resume tuned to that posting, plus a cover letter, and saves both as one-page PDFs in `Optimized Resumes/` named `Your_Name_Role_Company_resume.pdf` and `Your_Name_Role_Company_cover_letter.pdf` (running it again for the same job overwrites them). It uses `tailor_model` from `config.yaml` (default Fable 5.1), takes about 30 seconds, and costs roughly 20 cents.
+  - A window opens first with two optional boxes, one for what you want from the resume and one for the letter (for example "lead with my Kubernetes work" or "keep it under 250 words"). Each takes up to 2,000 characters of plain text, with a live counter. Control, invisible, and text-direction characters are removed.
+  - The button shows a spinner while it works. If you open another job and come back, it still shows that the run is going, then the saved file names when it finishes.
+  - Only facts from `profile.json` and your resume are used, so keep `profile.json` complete: a skill it never mentions will not appear in the PDFs. Skills in `do_not_assume` are never claimed. The letter does not list what you lack and does not gush about one part of the job; ask for either in your request box if you want it.
+  - Your phone number and email are not sent to the API. The PDF's contact line is copied from the top of your resume file. The PDFs are made with Microsoft Edge or Chrome, which must be installed. Read both files before sending them.
 - Options: `--port 8765`, `--no-open`. Stop it with Ctrl+C.
 
 ### Application tracker
@@ -160,6 +166,7 @@ How it works:
 - `gov_titles`: extra titles used only for government sources
 - `scoring`: `model`, `max_per_run` (cost cap), `workers` (API calls at the same time, default 8; lower it if you hit rate limits), `report_min_score`, `report_size`, `price_per_million_tokens`
 - `profile_model`: the model used by `main.py profile`
+- `tailor_model`: the model behind the viewer's **Tailor resume + cover letter** button
 - On/off switches, one per source type. `platforms:` has a `true`/`false` line for each board platform (`greenhouse`, `lever`, `ashby`, `smartrecruiters`, `workable`, `recruitee`, `bamboohr`, `rippling`, `gem`, `personio`, `workday`). Set one to `false` and a run skips every board of that platform, printing a "turned off" note; the boards stay in your lists, so setting it back to `true` restores them. A platform you leave out is on. A misspelled name is reported, not silently ignored. Aggregator feeds (`feeds.<name>.enabled`) and government sources (`government.<name>.enabled`) have their own `enabled:` switch. These switches only affect `run`; `crawl` and `discover` still look for boards on every platform you ask for.
 - `sources`: company boards to read
   - Greenhouse, Lever, Ashby: add the slug from the board URL (`boards.greenhouse.io/<slug>`, `jobs.lever.co/<slug>`, `jobs.ashbyhq.com/<slug>`). Bad slugs are skipped with a warning.
@@ -185,6 +192,7 @@ How it works:
 | `profile_gen.py` | Builds `profile.json` from the resume |
 | `db.py` | SQLite storage, cross-source de-duplication, job statuses, and the application tracker (dates and week / month / all-time counts) |
 | `viewer.py` | Local web viewer for the reports and the application tracker |
+| `tailor.py` | The viewer's resume and cover letter button: one Claude call, then PDFs in `Optimized Resumes/` |
 | `inspect_db.py` | Quick look at what is stored |
 | `config.example.yaml`, `profile.example.json`, `.env.example` | Templates to copy (see Setup) |
 | `config.yaml`, `profile.json`, `.env` | Your own settings, verified facts, and keys. Git-ignored; never commit them |
@@ -197,7 +205,7 @@ How it works:
 ## Notes
 
 - Cost: the pre-score picks which jobs go to Claude first, and `scoring.max_per_run` caps API calls per run. Each full run prints the tokens used and an estimated cost; check your usage on Anthropic's dashboard too.
-- Privacy: `.env`, `jobs.db`, `reports/`, `config.yaml`, `profile.json`, `discovered_sources.yaml`, and your resume files are git-ignored. Resume lines containing an email, a LinkedIn or GitHub link, or a phone number are stripped before any API call. The viewer listens only on your own computer and ignores requests addressed to any other host name.
+- Privacy: `.env`, `jobs.db`, `reports/`, `config.yaml`, `profile.json`, `discovered_sources.yaml`, `Optimized Resumes/`, and your resume files are git-ignored. Resume lines containing an email, a LinkedIn or GitHub link, or a phone number are stripped before any API call. The viewer listens only on your own computer and ignores requests addressed to any other host name.
 - Be polite: requests are spaced by `request_delay`. Use this only for your own job search and respect each site's terms.
 - Not included on purpose: LinkedIn and Indeed scraping (against their terms and brittle), WorkInTexas and governmentjobs.com (their `robots.txt` asks automated programs to stay out), and auto-submitting applications.
 - Known limits: only companies on the supported boards are covered. Workday, SmartRecruiters, and Texas HHS postings need one extra request each for the full text, made only for title matches that are not stored yet. Workday's list gives an approximate age ("Posted 30+ Days Ago"), so postings that are clearly too old are dropped without a lookup; ones rejected later for pay are looked up again on later runs. The USAJobs, Adzuna and Jooble sources have not been run against their live APIs (they need keys). The Texas HHS source depends on that site's page layout.

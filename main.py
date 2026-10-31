@@ -428,7 +428,7 @@ def money(v) -> str:
 def write_report(conn, cfg) -> Path | None:
     """Write reports/<today>.md with the best scored jobs, highest score first. Rerunning on the same day overwrites it."""
     scfg = cfg.get("scoring", {})
-    size = scfg.get("report_size", 25)
+    size = scfg.get("report_size", 1000)
     rows = visible(db.top(conn, size * 4, scfg.get("report_min_score", 60)),
                    filters.compile_exclusions(cfg.get("exclude_locations", [])))[:size]
     out_dir = ROOT / "reports"
