@@ -77,7 +77,7 @@ class AtsTests(unittest.TestCase):
         self.assertEqual((jobs[0].id, jobs[0].location), ("bb:acme:5", "Austin, Texas, United States"))
         with mock.patch.object(ats, "_get", lambda url, **k: {"result": {"jobOpening": {"description": "<b>Code</b>", "datePosted": "2026-10-05"}}}):
             sources.fill_detail(jobs[0])
-        self.assertEqual((jobs[0].description, jobs[0].posted), ("Code", "2026-10-05"))
+        self.assertEqual((jobs[0].description, jobs[0].posted), ("**Code**", "2026-10-05"))
 
     def test_rippling_pages_and_detail(self):
         data = [{"items": [{"id": "u1", "name": "Engineer", "url": "https://ats.rippling.com/x/jobs/u1",

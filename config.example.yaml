@@ -15,6 +15,8 @@ request_delay: 0.4        # seconds between HTTP requests (be polite to job boar
 
 profile_model: claude-sonnet-5-5   # used by `main.py profile` to read resume.pdf
 tailor_model: claude-fable-5-1     # used by the viewer's "Tailor resume + cover letter" button
+tips_model: claude-haiku-5-5       # used by the "Interview prep" button on a job's page
+tips_web_search: true              # let it search the web for what candidates report (about 1 cent per search, plus the extra tokens)
 
 scoring:
   model: claude-haiku-4-5-20251001   # cheap first pass; switch to claude-sonnet-5-5 for deeper analysis

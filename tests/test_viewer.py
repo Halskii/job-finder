@@ -12,6 +12,7 @@ import db
 import main
 import sources
 import viewer
+from errors import UserError
 
 SAMPLE = """# Job matches, 2026-10-30
 
@@ -110,6 +111,9 @@ class ServerTests(unittest.TestCase):
         status, body = self.get("/")
         self.assertEqual(status, 200)
         self.assertIn("<title>Job matches</title>", body)
+        self.assertIn('id="theme-toggle"', body)                    # Dark (the default) and Light
+        self.assertIn(':root[data-theme="light"]', body)
+        self.assertIn('localStorage.getItem("theme")', body)        # the choice is remembered
         self.assertEqual(json.loads(self.get("/api/reports")[1]), ["2026-10-30.md"])
 
     def test_report_joins_db_and_blocks_bad_links(self):
@@ -143,6 +147,111 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(self.post("/api/mark", {"id": "x", "status": "saved"}, ctype="text/plain")[0], 400)
 
 
+    def test_saved_jobs_list_follows_the_saved_status(self):
+        self.assertEqual(self.post("/api/mark", {"id": "greenhouse:stripe:1", "status": "saved"})[0], 200)
+        status, body = self.get("/api/saved")
+        saved = json.loads(body)["jobs"]
+        self.assertEqual((status, [j["id"] for j in saved]), (200, ["greenhouse:stripe:1"]))
+        self.assertEqual((saved[0]["title"], saved[0]["company"], saved[0]["status"]), ("Platform Engineer", "Stripe", "saved"))
+        self.assertEqual(saved[0]["description"], "Build <b>things</b>.")
+        self.post("/api/mark", {"id": "greenhouse:stripe:1", "status": "new"})
+        self.assertEqual(json.loads(self.get("/api/saved")[1])["jobs"], [])
+
+    def test_interview_rounds_through_the_tracker(self):
+        jid = "greenhouse:stripe:1"
+        self.assertEqual(self.post("/api/round", {"action": "add", "id": "nope"})[0], 404)
+        self.post("/api/mark", {"id": jid, "status": "new"})
+        self.assertEqual(self.post("/api/round", {"action": "add", "id": jid})[0], 404)       # not in the tracker yet
+        self.post("/api/mark", {"id": jid, "status": "applied"})
+        status, body = self.post("/api/round", {"action": "add", "id": jid})
+        self.assertEqual(status, 200)
+        rid = body["id"]
+        self.post("/api/round", {"action": "add", "id": jid, "kind": "System design", "date": "2999-01-02", "outcome": "waiting"})
+        app = next(a for a in json.loads(self.get("/api/tracker")[1])["applications"] if a["id"] == jid)
+        self.assertEqual(app["status"], "interview")                                          # a first round moves applied to interview
+        self.assertEqual([(r["kind"], r["date"], r["outcome"]) for r in app["rounds"]],
+                         [("Round 1", None, "scheduled"), ("System design", "2999-01-02", "waiting")])
+        self.assertEqual(self.post("/api/round", {"action": "update", "round_id": rid, "kind": "Phone\x00 screen",
+                                                  "date": "2026-11-03", "outcome": "passed", "notes": "ok\n\nfine"})[0], 200)
+        app = next(a for a in json.loads(self.get("/api/tracker")[1])["applications"] if a["id"] == jid)
+        self.assertEqual((app["rounds"][0]["kind"], app["rounds"][0]["notes"]), ("Phone screen", "ok fine"))
+        for bad in ({"action": "update", "round_id": rid, "kind": "x", "date": "2026-13-45"},
+                    {"action": "update", "round_id": rid, "kind": "x", "outcome": "hired"},
+                    {"action": "update", "round_id": rid, "kind": "  "},
+                    {"action": "explode"}, {"action": "update"}):
+            self.assertEqual(self.post("/api/round", bad)[0], 400, bad)
+        self.assertEqual(self.post("/api/round", {"action": "delete", "round_id": rid})[0], 200)
+        self.assertEqual(self.post("/api/round", {"action": "delete", "round_id": rid})[0], 404)
+        self.assertEqual(self.post("/api/round", {"action": "add", "id": jid}, ctype="text/plain")[0], 400)
+        self.post("/api/mark", {"id": jid, "status": "new"})
+
+    def stream_tips(self, body):
+        req = urllib.request.Request(self.base + "/api/tips", data=json.dumps(body).encode(), method="POST",
+                                     headers={"Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req) as r:
+                return r.status, r.headers["Content-Type"], [json.loads(line) for line in r.read().decode("utf-8").splitlines() if line]
+        except urllib.error.HTTPError as e:
+            return e.code, e.headers["Content-Type"], json.loads(e.read())
+
+    def test_tips_endpoint_streams_one_json_event_per_line(self):
+        from unittest import mock
+        self.assertEqual(self.post("/api/tips", {})[0], 400)
+        self.assertEqual(self.stream_tips({"id": "nope"})[0], 404)
+        events = [{"type": "start", "disclaimer": "d"}, {"type": "text", "text": "## Hi"}, {"type": "done", "result": {}}]
+        with mock.patch.object(viewer, "tips_events", return_value=iter(events)) as f:
+            status, ctype, got = self.stream_tips({"id": "greenhouse:stripe:1"})
+            self.assertEqual((status, got), (200, events))
+            self.assertIn("ndjson", ctype)
+            f.assert_called_once_with("greenhouse:stripe:1", False)
+        with mock.patch.object(viewer, "tips_events", return_value=iter([])) as f:
+            self.stream_tips({"id": "greenhouse:stripe:1", "refresh": True})
+            f.assert_called_once_with("greenhouse:stripe:1", True)
+        with viewer._tipping:   # another job's prep is being written
+            self.assertEqual(self.stream_tips({"id": "greenhouse:stripe:1"})[0], 409)
+
+    def test_a_failure_while_writing_becomes_an_error_event(self):
+        from unittest import mock
+        with mock.patch.object(viewer.tips, "stream_tips", side_effect=UserError("No Anthropic API key found. Add it to .env.", "no_api_key")):
+            got = list(viewer.tips_events("greenhouse:stripe:1"))
+        self.assertEqual(got, [{"type": "error", "error": "No Anthropic API key found. Add it to .env.", "code": "no_api_key"}])
+        with mock.patch.object(viewer.tips, "stream_tips", side_effect=RuntimeError("boom at C:\\secret\\file.py line 3")), \
+                self.assertLogs("job-finder", level="ERROR"):
+            got = list(viewer.tips_events("greenhouse:stripe:1"))
+        self.assertEqual((got[0]["type"], got[0]["code"]), ("error", "internal"))
+        self.assertNotIn("secret", got[0]["error"])          # details of an unexpected error stay in the terminal
+        self.assertNotIn("RuntimeError", got[0]["error"])
+
+    def test_interview_prep_list_holds_jobs_with_saved_prep(self):
+        conn = db.connect(str(viewer.DB_PATH))
+        try:
+            self.assertEqual(json.loads(self.get("/api/prep")[1])["jobs"], [])
+            db.save_tips(conn, "greenhouse:stripe:1", {"markdown": "## Summary"}, "m", "2026-10-31")
+            jobs = json.loads(self.get("/api/prep")[1])["jobs"]
+            self.assertEqual([(j["id"], j["company"], j["prep_created"]) for j in jobs], [("greenhouse:stripe:1", "Stripe", "2026-10-31")])
+        finally:
+            conn.execute("DELETE FROM interview_tips")
+            conn.commit()
+            conn.close()
+
+    def test_discarded_jobs_are_listed_in_the_trash_until_restored(self):
+        jid = "greenhouse:stripe:1"
+        self.post("/api/mark", {"id": jid, "status": "new"})
+        self.assertEqual(json.loads(self.get("/api/trash")[1])["jobs"], [])
+        self.post("/api/mark", {"id": jid, "status": "skipped"})
+        trash = json.loads(self.get("/api/trash")[1])["jobs"]
+        self.assertEqual([(j["id"], j["title"], j["status"]) for j in trash], [(jid, "Platform Engineer", "skipped")])
+        self.assertEqual(trash[0]["description"], "Build <b>things</b>.")
+        self.post("/api/mark", {"id": jid, "status": "new"})
+        self.assertEqual(json.loads(self.get("/api/trash")[1])["jobs"], [])
+
+    def test_one_job_by_id_for_the_trackers_details_button(self):
+        status, body = self.get("/api/job/greenhouse%3Astripe%3A1")
+        job = json.loads(body)
+        self.assertEqual((status, job["id"], job["title"], job["company"]), (200, "greenhouse:stripe:1", "Platform Engineer", "Stripe"))
+        self.assertEqual(job["description"], "Build <b>things</b>.")
+        self.assertEqual(self.get("/api/job/nope")[0], 404)
+
     def test_tailor_endpoint(self):
         from unittest import mock
         self.assertEqual(self.post("/api/tailor", {"id": "x"}, ctype="text/plain")[0], 400)
@@ -158,13 +267,35 @@ class ServerTests(unittest.TestCase):
             f.assert_called_once_with("x", "abc", "ok")
         with mock.patch.object(viewer, "tailor_for", side_effect=LookupError("no such job")):
             self.assertEqual(self.post("/api/tailor", {"id": "nope"})[0], 404)
-        with mock.patch.object(viewer, "tailor_for", side_effect=RuntimeError("No ANTHROPIC_API_KEY found")):
+        with mock.patch.object(viewer, "tailor_for", side_effect=UserError("No Anthropic API key found. Add it to .env.", "no_api_key")):
             status, body = self.post("/api/tailor", {"id": "x"})
-            self.assertEqual(status, 500)
-            self.assertIn("No ANTHROPIC_API_KEY", body["error"])
+            self.assertEqual((status, body["code"]), (422, "no_api_key"))   # something the person can fix
+            self.assertIn("No Anthropic API key", body["error"])
+        with mock.patch.object(viewer, "tailor_for", side_effect=ValueError("secret detail")), self.assertLogs("job-finder", level="ERROR"):
+            status, body = self.post("/api/tailor", {"id": "x"})
+            self.assertEqual((status, body["code"]), (500, "internal"))
+            self.assertNotIn("secret", body["error"])
+            self.assertNotIn("ValueError", body["error"])
         with viewer._tailoring:   # a tailoring already running
             self.assertEqual(self.post("/api/tailor", {"id": "x"})[0], 409)
 
+
+    def test_every_error_response_has_a_sentence_and_a_code_and_never_a_trace(self):
+        from unittest import mock
+        cases = [self.get("/api/report/nope.md"), self.get("/api/nothing"), self.get("/api/job/nope"), self.get("/api/reports", {"Host": "evil.example"}),
+                 self.post("/api/mark", {"id": "x", "status": "deleted"}), self.post("/api/applied-date", {"id": "x", "date": "2999-01-01"}),
+                 self.post("/api/mark", {}), self.post("/api/round", {"action": "update", "round_id": 999, "kind": "x"})]
+        for status, body in cases:
+            data = json.loads(body) if isinstance(body, str) else body
+            self.assertGreaterEqual(status, 400, data)
+            self.assertTrue(data["error"].endswith("."), data)             # a sentence
+            self.assertTrue(data["code"], data)
+            for leak in ("Traceback", "Error:", "bad request", ".py", "no such"):
+                self.assertNotIn(leak, data["error"], data)
+        with mock.patch.object(viewer, "load_tracker", side_effect=RuntimeError("db exploded at /x/y.py")), self.assertLogs("job-finder", level="ERROR"):
+            status, body = self.get("/api/tracker")        # an unexpected failure in any route is a friendly 500, not a dropped connection
+        self.assertEqual(status, 500)
+        self.assertNotIn("exploded", body)
 
     def test_a_negative_content_length_does_not_hang_the_server(self):
         import http.client

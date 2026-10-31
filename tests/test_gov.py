@@ -122,7 +122,7 @@ class TexasHhsTests(unittest.TestCase):
         job = sources.Job("tx:1", "texas_hhs", "Texas DFPS", "Java Developer", "AUSTIN, TX", "https://careers.hhs.texas.gov/x/1/", posted="2026-10-01")
         with mock.patch.object(g.requests, "get", lambda *a, **k: Resp()):
             sources.fill_detail(job)
-        self.assertIn("Build Java services.", job.description)
+        self.assertIn("Build **Java** services.", job.description)
         self.assertEqual((job.pay_min, job.pay_max), (65103, 106633))
         self.assertEqual(job.posted, "2026-10-20")
 
