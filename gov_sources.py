@@ -150,6 +150,7 @@ def parse_salary(text: str) -> tuple[int | None, int | None]:
 
 
 def fill_texas_hhs_detail(job: Job) -> None:
+    """Read one posting's page for what the search list lacks: the description, the salary range and the exact date."""
     r = requests.get(job.url, headers=sources.UA, timeout=sources.TIMEOUT)
     r.raise_for_status()
     body = re.search(r'<span class="jobdescription">(.*?)</span>\s*(?:</div>|<div)', r.text, re.S)

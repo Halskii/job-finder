@@ -167,6 +167,7 @@ class Handler(BaseHTTPRequestHandler):
         self._send(code, json.dumps(obj).encode("utf-8"), "application/json; charset=utf-8")
 
     def do_GET(self) -> None:
+        """Serve the page and the read-only JSON endpoints it loads its data from."""
         if not self._host_ok():
             return self._json(403, {"error": "bad host"})
         path = unquote(urlparse(self.path).path)
@@ -182,6 +183,7 @@ class Handler(BaseHTTPRequestHandler):
         self._json(404, {"error": "not found"})
 
     def do_POST(self) -> None:
+        """The two writes the page can make: change a job's status, or the date of an application."""
         if not self._host_ok():
             return self._json(403, {"error": "bad host"})
         # Requiring JSON means a web page on another origin can't send this without a CORS preflight, which we never grant.
@@ -409,6 +411,7 @@ loadReports().catch(e=>{$("#main").replaceChildren(el("div",{className:"empty",t
 
 
 def main() -> None:
+    """Start the viewer on this computer only (127.0.0.1), so nothing else on the network can reach it."""
     ap = argparse.ArgumentParser(description="Browse job reports in your browser.")
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--no-open", action="store_true", help="don't open a browser tab")

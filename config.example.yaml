@@ -18,6 +18,7 @@ profile_model: claude-sonnet-5-5   # used by `main.py profile` to read resume.pd
 scoring:
   model: claude-haiku-4-5-20251001   # cheap first pass; switch to claude-sonnet-5-5 for deeper analysis
   max_per_run: 40                    # cap LLM calls per run to control cost
+  workers: 8                          # scoring calls made at the same time (lower this if you see rate-limit errors)
   report_min_score: 60               # only show jobs scoring at least this in the report
   report_size: 25
   price_per_million_tokens: {input: 1.0, output: 5.0}   # USD for the scoring model above; edit if prices change
@@ -43,9 +44,15 @@ titles:
 # Titles containing any of these words are dropped (adjust to your experience level).
 exclude_title_words: [senior, sr, staff, principal, lead, manager, director, head, vp, intern, internship, architect]
 
-# Search words used for Workday sites (they have a free-text title search).
-workday_search_terms: ["software engineer", "platform engineer", "devops", "cloud engineer", "ai engineer", "machine learning", "site reliability", "automation engineer"]
+# Search words for Workday sites (they have a free-text title search). 'auto' derives them from `titles` above
+# (level markers like I / II / III / Associate / Junior are dropped), so you only edit one list. You can also give
+# your own list, or mix: [auto, devops, "machine learning"] adds extra words to the derived ones.
+workday_search_terms: auto
 workday_max_pages: 3
+workday_workers: 16       # Workday sites read at the same time (each site still gets one request at a time)
+detail_workers: 16        # servers asked for full postings at the same time (same rule: one request at a time per server)
+fetch_workers: 8          # Greenhouse / Lever / Ashby / Gem / ... boards read at the same time
+crawl_workers: 16         # boards checked at the same time by `main.py crawl`
 
 # Job boards. Add any company that uses these systems (or let `main.py discover` / `main.py workday-add` do it for you):
 #   Greenhouse:      boards.greenhouse.io/<slug> or job-boards.greenhouse.io/<slug>
@@ -63,7 +70,23 @@ sources:
   # Example Workday entry:
   #  - {name: Vanguard, host: vanguard.wd5.myworkdayjobs.com, tenant: vanguard, site: vanguard_external}
 
-# Aggregator feeds. Remotive (remote jobs) asks for at most ~4 requests a day, so it is fetched at most once per min_hours.
+# Turn a whole platform off by setting it to false (a platform not listed here is on). Its boards stay in your lists and
+# are skipped, with a note in the run output. Aggregator feeds and government sources have their own `enabled:` below.
+platforms:
+  greenhouse: true
+  lever: true
+  ashby: true
+  smartrecruiters: true
+  workable: true
+  recruitee: true
+  bamboohr: true
+  rippling: true
+  gem: true
+  personio: true
+  workday: true
+
+# Aggregator feeds, each on when `enabled: true`. Each is fetched at most once per `min_hours` (default 6; Remotive asks for
+# at most ~4 requests a day). Job links go to the feed's own site, as their terms require. Remotive details:
 # Its job links go to remotive.com, as their terms require. Categories: software-development, devops,
 # artificial-intelligence, engineering, information-technology, data, qa.
 feeds:
@@ -71,6 +94,29 @@ feeds:
     enabled: true
     min_hours: 6
     categories: [software-development, devops, artificial-intelligence]
+  remoteok:                  # remoteok.com; job links go to remoteok.com, as their terms require
+    enabled: true
+  weworkremotely:            # RSS feeds; categories are the names in weworkremotely.com/categories/<name>
+    enabled: true
+    categories: [remote-programming-jobs, remote-devops-sysadmin-jobs, remote-back-end-programming-jobs]
+  jobicy:                    # searched with your title words (override with `terms: [...]`); US-eligible jobs only
+    enabled: true
+  workingnomads:
+    enabled: true
+  himalayas:                 # searched with your title words, 20 results a page
+    enabled: true
+    pages: 2
+  adzuna:                    # large US aggregator; needs free keys in .env (ADZUNA_APP_ID, ADZUNA_APP_KEY)
+    enabled: false
+    min_hours: 12
+    pages: 2
+  jooble:                    # aggregator; needs a free key in .env (JOOBLE_API_KEY)
+    enabled: false
+    min_hours: 12
+    pages: 2
+  hackernews:                # the monthly "Ask HN: Who is hiring?" threads, one job per top-level comment
+    enabled: true
+    threads: 2
 
 # Government job titles, used only for government sources. They are titled differently from tech companies
 # (for example Texas 'Programmer III' or federal 'IT Specialist (APPSW)'). Level markers are optional.

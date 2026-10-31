@@ -48,10 +48,12 @@ Put your resume in the project folder as `resume.pdf` (a `resume.txt` or `resume
 |---|---|
 | `ANTHROPIC_API_KEY` | Scoring and `main.py profile`. Without it, `run` still fetches and stores jobs |
 | `USAJOBS_API_KEY` and `USAJOBS_EMAIL` | Optional. Federal jobs from USAJobs (see "Government jobs") |
+| `ADZUNA_APP_ID` and `ADZUNA_APP_KEY` | Optional. The Adzuna feed (see "Adding more boards") |
+| `JOOBLE_API_KEY` | Optional. The Jooble feed |
 
 ## Commands
 
-You can call the virtual environment's Python directly without activating it, for example `.venv/Scripts/python.exe main.py run`.
+You can call the virtual environment's Python directly without activating it, for example `.venv/Scripts/python.exe main.py run`. If a run stops with `No module named 'anthropic'` (or the program says the package is not installed for the Python running it), you started it with a different Python than the one in `.venv`. Use the command above, or activate the environment first. The program checks this before fetching anything, so no time is lost.
 
 | Command | What it does |
 |---|---|
@@ -63,6 +65,7 @@ You can call the virtual environment's Python directly without activating it, fo
 | `python main.py list --top 15` | Best scored jobs from the database (`--min-score N` to change the cutoff) |
 | `python main.py mark <id> applied "note"` | Set a job's status. `<id>` can be any unique fragment of a job id. `applied` also records today as the date applied |
 | `python main.py discover Stripe "Palo Alto Networks"` | Look for those companies' job boards (see "Adding more boards"). Add `--add` to save what it finds, or `--file companies.txt` for a list |
+| `python main.py crawl --add` | Find company boards **in bulk** from Common Crawl's public web index, check each one, and save the ones with a posting matching your titles (see "Adding more boards") |
 | `python main.py workday-add <careers URL>` | Add a Workday careers site from any page address on it |
 | `python viewer.py` | Open the report viewer and application tracker in your browser (see below) |
 | `python inspect_db.py` | Peek at what is stored (`--where "california"` searches locations, `--odd` lists senior/staff/lead titles that slipped through) |
@@ -74,22 +77,36 @@ Typical first run: `profile` (review the diff, answer `y`), then `run`, then `vi
 
 ### Reading a run's output
 
+A run prints a message at every stage:
+
+1. `Fetching postings...`, then one line per source **as it finishes**. Sources are read several at a time, so the order varies from run to run.
+2. `Filtering N postings...`, then the cheap filters (title, location, age).
+3. `Reading the full text of N postings that passed the filters...`: Workday and similar sites list only titles, so each match needs one more request. This is the slow part of a run, so it prints a percentage line at every 10% (`[ 40%] full postings read: 80 of 200`).
+4. The summary line and a `Time:` line (below).
+5. `Scoring N jobs with <model>, 8 at a time...`, then one line per job as Claude finishes it (`[12/100]  82 apply Company - Title`) and `Scoring took Ns`.
+
+A quiet stretch of more than a minute or two in stages 3 or 5 means something is stuck.
+
 Each source prints one line, for example `greenhouse stripe 747 postings`, or `skipped (...)` with the reason if it failed (a bad slug, a network error, a missing key). Then one summary line:
 
-`Fetched | title match | after location | excluded locations | already seen | duplicates | too old | below pay | NEW`
+`Fetched | title match | after location | excluded locations | already seen | duplicates | dropped by full location | too old | below pay | NEW`
 
-Each number is how many postings were left or dropped at that step; `NEW` is what was stored this run. After scoring it prints the tokens used and an estimated cost (from `scoring.price_per_million_tokens` in `config.yaml`, so check it against Anthropic's pricing page).
+Each number is how many postings were left or dropped at that step; `NEW` is what was stored this run. `dropped by full location` counts Workday postings whose list said only "6 Locations"; the full posting is fetched, its real places are checked against `us_only` and `exclude_locations`, and it is dropped if none are allowed. The `Time:` line after it shows how long listing the sources and reading full postings each took. After scoring it prints the tokens used and an estimated cost (from `scoring.price_per_million_tokens` in `config.yaml`, so check it against Anthropic's pricing page).
 
 ## Adding more boards
 
-Postings come from public job-board data that companies publish themselves: **Greenhouse, Lever, Ashby, SmartRecruiters, and Workday**, plus the **Remotive** remote-jobs feed and two government sources (below). The more companies you add, the more postings are searched.
+Postings come from public job-board data that companies publish themselves, from the applicant-tracking systems they use: **Greenhouse, Lever, Ashby, SmartRecruiters, Workable, Recruitee, BambooHR, Rippling, Gem, Personio, and Workday**. On top of that are seven aggregator feeds (below) and two government sources. The more companies you add, the more postings are searched.
+
+Sites that forbid bots in their terms or `robots.txt` (LinkedIn, Indeed, Glassdoor, ZipRecruiter, WorkInTexas, governmentjobs.com) are not used. Most of their postings are copies of ones on the company's own board, which is where this program reads them.
 
 - **`discover`** guesses a company's board address from its name and tries Greenhouse, Lever, Ashby, and SmartRecruiters. For each one it finds, it shows how many postings the board has, how many match your title, location, and pay filters, and one example posting with its link. **Check the example is the company you meant**, since a short name can match someone else's board. Nothing is saved until you run it again with `--add`. A name it can't find is usually a company on Workday or its own system, or one whose board name differs from its brand: for SmartRecruiters you can pass the exact id, for example `discover BoschGroup`.
+- **`crawl`** finds boards in bulk, with no company names needed. [Common Crawl](https://commoncrawl.org) publishes a free index of web addresses, and every company on Greenhouse, Ashby, Workday and the rest has addresses such as `boards.greenhouse.io/<company>/jobs/123`. `crawl` lists those, takes the company name out of each, asks the platform's own job API whether the board exists, and keeps boards that currently list a posting matching your titles and locations (`--keep-all` keeps every live board). Run `python main.py crawl` first to see what it would add, then `python main.py crawl --add` to save. `--systems greenhouse,ashby` limits it to some platforms and `--crawls N` reads more or fewer recent crawls (default 4; more crawls find more boards). Common Crawl's index is a shared free service that answers slowly and sometimes refuses connections, so the program reads it gently (one page every couple of seconds) and a platform it cannot read is skipped with a note. If it keeps refusing you, wait an hour or so and run it again; that is not an error in your setup. It remembers what it has read and checked in `crawl_cache.json`, so running it again only does new work; boards that failed are asked again after 14 days, or at once with `--recheck`. Re-run it now and then: a board only joins your list when it has a matching posting on the day it is checked.
 - **`workday-add`**: open the company's careers page, click any job, copy the address from the browser bar, and run `python main.py workday-add "<address>"`. It reads the host, tenant, and site out of the address, confirms the site responds, and saves it. Use `--name "Company"` for a nicer label.
 - Boards added this way are stored in `discovered_sources.yaml` and merged with `sources` in `config.yaml` each run, so `config.yaml` and its comments are never rewritten. You can also add slugs to `config.yaml` by hand, including a `smartrecruiters:` list (`jobs.smartrecruiters.com/<CompanyId>`, not case sensitive).
-- **Remotive** (`feeds.remotive` in `config.yaml`): remote jobs, limited to the categories you list. Its terms ask for no more than about four requests a day, so it is fetched at most once every `min_hours` (default 6) no matter how often you run the program. Its job links go to remotive.com, as its terms require.
+- **Feeds** (`feeds:` in `config.yaml`, each on with `enabled: true`): Remotive, Remote OK, We Work Remotely, Jobicy, Working Nomads, Himalayas, and the monthly **Hacker News "Who is hiring?"** threads (one job per top-level comment, read from the first line `Company | Role | Location`). Jobicy and Himalayas are searched with your title words (Himalayas has over 100,000 postings, so it can't be read whole). Two broad aggregators, **Adzuna** and **Jooble**, are off until you add a free key to `.env` and set `enabled: true` (they return only a short snippet of each description, so scoring has less to go on). Each feed is fetched at most once every `min_hours` (default 6; Remotive asks for no more than about four requests a day) no matter how often you run the program. Every feed's job links go to its own site, as the terms of each require, and a job's `source` names it.
 - **Duplicates:** if the same company and title is already stored from a different source, for example a job on both a company's board and Remotive, the second copy is skipped (shown as `duplicates` in the run summary). The same title in two different cities from one source is kept, because those are separate postings.
-- Not included: Adzuna (needs a free key), Oracle and iCIMS career sites (no clean public data), and Workable (its old public endpoint now returns nothing).
+- **Many Workday sites:** `workday-add` and `discovery` can build a list of a hundred or more sites. Sites are read several at a time (`workday_workers`), each with one request at a time. A first run over ~100 sites read 22,000 postings and stored ~700 new matches. With the Workday sites plus about 1,400 Greenhouse, Ashby and SmartRecruiters boards from `crawl` and the feeds, a first run read about 114,000 postings and stored about 2,200 matches in under ten minutes; each run prints how long listing, full-posting lookups, and scoring took. Later runs only fetch details for postings not yet stored, so they are faster. With that many sites, use a short `workday_search_terms` list rather than `auto`.
+- Not included: Breezy (its postings are drawn by JavaScript, so there is no text to read), The Muse (needs a key), Lever in bulk (Lever blocks Common Crawl's crawler, so `crawl` finds no Lever boards; add them by name with `discover` or by hand), and Oracle, iCIMS, Taleo, and SuccessFactors career sites (no uniform public data).
 
 ### Government jobs (on by default)
 
@@ -97,7 +114,7 @@ Both are under `government:` in `config.yaml`; set `enabled: false` on one to tu
 
 - **Federal (USAJobs)**: the official API. It needs a free key, so until you add one the run prints a "skipped" line and carries on. Request a key at https://developer.usajobs.gov/apirequest, then put `USAJOBS_API_KEY` and `USAJOBS_EMAIL` (the email the key was issued to) in `.env`. `keywords` sets what is searched. This part has been tested only against the API's documented format, not live, because that needs a key; if the first run with your key shows an error, tell me what it says.
 - **Texas HHS (HHSC, DFPS, DSHS)** at careers.hhs.texas.gov: the site has no API, so the program reads the same public search and job pages any visitor sees (one request at a time, a few pages per search word). The site's `robots.txt` allows this and its pages state no rule against it. This is the most fragile source: if the site changes its layout the run prints "no postings found" instead of failing. Monthly salaries are converted to a yearly figure so the `min_pay` filter works.
-- **Government titles**: these postings are titled differently from tech companies ("Programmer III", "IT Specialist (APPSW)"). `gov_titles` in `config.yaml` adds extra titles that apply **only to government sources**; the seniority exclusions (senior, lead, manager, ...) still apply.
+- **Government titles**: these postings are titled differently from tech companies ("Programmer III", "IT Specialist (APPSW)"). `gov_titles` in `config.yaml` adds extra titles that apply **only to government sources** (USAJobs, Texas HHS, and any Workday site marked `gov: true`); the seniority exclusions (senior, lead, manager, ...) still apply.
 - **Left out on purpose**: WorkInTexas.com and governmentjobs.com (the NEOGOV site many cities and counties use), because their `robots.txt` tells automated programs not to crawl them. For a city, county, or agency on Workday, use `workday-add`; for one on Greenhouse, Lever, or similar, use `discover`.
 
 ## Viewing matches in the browser
@@ -137,15 +154,18 @@ How it works:
 ## Configuration (`config.yaml`)
 
 - `min_pay`, `max_age_days`, `us_only`, `request_delay`
+- `workday_workers`, `detail_workers`, `fetch_workers`, `crawl_workers`: how many different servers are read at the same time (defaults 16, 16, 8, and 16 for boards checked by `crawl`). Each Workday site and each full-posting server still gets only one request at a time, spaced by `request_delay`, so adding many sites makes a run longer but does not hammer any one site. The Greenhouse, Lever, Ashby and SmartRecruiters boards are small lists from shared public APIs, read up to `fetch_workers` at a time. Connections are reused between requests.
 - `exclude_locations`: places to drop (California and its major cities are pre-filled). A posting is dropped only if **every** location it lists matches, so "San Francisco, CA | Remote - US" is kept because the remote option is still open to you. Matching is whole-word and case-insensitive, except two-letter state codes, which must be capitalized (`CA`). Add or remove entries freely, or delete the list to turn it off. Check what's stored with `python inspect_db.py --where "california"`.
 - `titles`: your title list (from `filter.txt`), and `exclude_title_words`
 - `gov_titles`: extra titles used only for government sources
-- `scoring`: `model`, `max_per_run` (cost cap), `report_min_score`, `report_size`, `price_per_million_tokens`
+- `scoring`: `model`, `max_per_run` (cost cap), `workers` (API calls at the same time, default 8; lower it if you hit rate limits), `report_min_score`, `report_size`, `price_per_million_tokens`
 - `profile_model`: the model used by `main.py profile`
+- On/off switches, one per source type. `platforms:` has a `true`/`false` line for each board platform (`greenhouse`, `lever`, `ashby`, `smartrecruiters`, `workable`, `recruitee`, `bamboohr`, `rippling`, `gem`, `personio`, `workday`). Set one to `false` and a run skips every board of that platform, printing a "turned off" note; the boards stay in your lists, so setting it back to `true` restores them. A platform you leave out is on. A misspelled name is reported, not silently ignored. Aggregator feeds (`feeds.<name>.enabled`) and government sources (`government.<name>.enabled`) have their own `enabled:` switch. These switches only affect `run`; `crawl` and `discover` still look for boards on every platform you ask for.
 - `sources`: company boards to read
   - Greenhouse, Lever, Ashby: add the slug from the board URL (`boards.greenhouse.io/<slug>`, `jobs.lever.co/<slug>`, `jobs.ashbyhq.com/<slug>`). Bad slugs are skipped with a warning.
   - SmartRecruiters: the company id from `jobs.smartrecruiters.com/<CompanyId>`.
-  - Workday: copy `host`, `tenant`, and `site` from the careers URL (`https://<host>/en-US/<site>/...`), or let `workday-add` do it. `workday_search_terms` and `workday_max_pages` control how much is read.
+  - Workable, Recruitee, BambooHR, Rippling, Gem, Personio: lists named `workable:`, `recruitee:`, `bamboohr:`, `rippling:`, `gem:`, `personio:`, each holding the company's slug from its board address (`apply.workable.com/<slug>`, `<slug>.recruitee.com`, `<slug>.bamboohr.com`, `ats.rippling.com/<slug>`, `jobs.gem.com/<slug>`, `<slug>.jobs.personio.de`). Most people let `crawl` fill these in.
+  - Workday: copy `host`, `tenant`, and `site` from the careers URL (`https://<host>/en-US/<site>/...`), or let `workday-add` do it. Add `gov: true` to an entry for a government employer (a state agency or university, say): it is then also searched with, and matched against, `gov_titles`. `workday_search_terms` (default `auto`: derived from `titles`, so you only edit one list; or give your own list, or `[auto, extra word]`) and `workday_max_pages` control how much is read. Each search word is one search per Workday site, and a search stops as soon as it runs out of results. Deriving the words from a long title list means more searches per site than a short hand-written list: in testing on one 350-posting site, 54 derived words took about 140 requests (3 pages each) and found the same 33 matching jobs as 8 hand-written words did in 37 requests. With many Workday sites, or `workday_max_pages` set high, a run gets slow; keep `workday_max_pages` low (3 is plenty, results come best-match first) or give a short list of your own.
 - `feeds.remotive`: `enabled`, `min_hours`, `categories`
 - `government.usajobs` (`enabled`, `keywords`, `pages`) and `government.texas_hhs` (`enabled`, `search_terms`, `pages`)
 
@@ -155,6 +175,9 @@ How it works:
 |---|---|
 | `main.py` | Command-line entry point and pipeline |
 | `sources.py` | Job-board fetchers (Greenhouse, Lever, Ashby, SmartRecruiters, Workday, Remotive) and pay parsing |
+| `ats_sources.py` | More applicant-tracking systems: Workable, Recruitee, BambooHR, Rippling, Gem, Personio |
+| `feed_sources.py` | Aggregator feeds: Remote OK, We Work Remotely, Jobicy, Working Nomads, Himalayas, Hacker News "Who is hiring?" |
+| `crawl.py` | Bulk board discovery from Common Crawl's public index (the `crawl` command) |
 | `gov_sources.py` | Government sources: USAJobs (federal API) and Texas HHS careers |
 | `discovery.py` | Board discovery from company names, Workday address parsing, and merging `discovered_sources.yaml` |
 | `filters.py` | Title, location, pay, and age filters, plus the keyword pre-score |
@@ -165,7 +188,8 @@ How it works:
 | `inspect_db.py` | Quick look at what is stored |
 | `config.example.yaml`, `profile.example.json`, `.env.example` | Templates to copy (see Setup) |
 | `config.yaml`, `profile.json`, `.env` | Your own settings, verified facts, and keys. Git-ignored; never commit them |
-| `discovered_sources.yaml` | Boards added by `discover --add` and `workday-add` (created on first use, git-ignored) |
+| `discovered_sources.yaml` | Boards added by `discover --add`, `workday-add` and `crawl --add` (created on first use, git-ignored) |
+| `crawl_cache.json` | What `crawl` has already read and checked, so reruns are quick (git-ignored; safe to delete) |
 | `jobs.db`, `reports/` | Stored postings, scores, and the tracker; daily Markdown reports (git-ignored) |
 | `LICENSE` | All rights reserved: viewable for evaluation, not for reuse |
 | `tests/` | Offline tests (`tests/data/` holds a saved page sample). Run with `python -m unittest` |
@@ -176,7 +200,7 @@ How it works:
 - Privacy: `.env`, `jobs.db`, `reports/`, `config.yaml`, `profile.json`, `discovered_sources.yaml`, and your resume files are git-ignored. Resume lines containing an email, a LinkedIn or GitHub link, or a phone number are stripped before any API call. The viewer listens only on your own computer and ignores requests addressed to any other host name.
 - Be polite: requests are spaced by `request_delay`. Use this only for your own job search and respect each site's terms.
 - Not included on purpose: LinkedIn and Indeed scraping (against their terms and brittle), WorkInTexas and governmentjobs.com (their `robots.txt` asks automated programs to stay out), and auto-submitting applications.
-- Known limits: only companies on the supported boards are covered. Workday, SmartRecruiters, and Texas HHS postings need one extra request each for the full text, made only for title matches that are not stored yet (so ones rejected for age or pay are looked up again on later runs). The USAJobs source has not been run against the live API. The Texas HHS source depends on that site's page layout.
+- Known limits: only companies on the supported boards are covered. Workday, SmartRecruiters, and Texas HHS postings need one extra request each for the full text, made only for title matches that are not stored yet. Workday's list gives an approximate age ("Posted 30+ Days Ago"), so postings that are clearly too old are dropped without a lookup; ones rejected later for pay are looked up again on later runs. The USAJobs, Adzuna and Jooble sources have not been run against their live APIs (they need keys). The Texas HHS source depends on that site's page layout.
 
 ## License
 

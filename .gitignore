@@ -4,6 +4,7 @@ config.yaml
 profile.json
 profile.json.bak
 discovered_sources.yaml
+crawl_cache.json
 resume.pdf
 resume.txt
 resume/

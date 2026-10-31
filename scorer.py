@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-import re
 
 SYSTEM = """You are a strict, honest job-fit analyst for one candidate. You are given the candidate's VERIFIED profile
 and a job posting. Rules:
@@ -23,6 +22,7 @@ Return ONLY a JSON object, no prose, with exactly these keys:
 
 
 def _extract_json(text: str) -> dict:
+    """The JSON object in the model's reply, tolerating any prose or code fence around it."""
     start, end = text.find("{"), text.rfind("}")
     if start == -1 or end == -1:
         raise ValueError("no JSON object in model output")
@@ -30,7 +30,9 @@ def _extract_json(text: str) -> dict:
 
 
 def score_job(client, model: str, profile: dict, job, min_pay: int, resume_text: str = "") -> dict:
-    description = (job["description"] or "")[:7000]
+    """Ask Claude how well one stored job (a database row) fits the profile. Returns the parsed answer plus the token
+    counts under `_in` / `_out`, which the caller uses to estimate cost."""
+    description = (job["description"] or "")[:7000]   # long postings are cut to keep each call cheap
     pay = "unknown"
     if job["pay_min"] or job["pay_max"]:
         pay = f"{job['pay_min'] or '?'} - {job['pay_max'] or '?'}"
@@ -49,6 +51,7 @@ def score_job(client, model: str, profile: dict, job, min_pay: int, resume_text:
     usage = getattr(msg, "usage", None)
     data["_in"] = int(getattr(usage, "input_tokens", 0) or 0)
     data["_out"] = int(getattr(usage, "output_tokens", 0) or 0)
+    # Keep the answer usable even if the model strays from the format.
     data["fit_score"] = max(0, min(100, int(data.get("fit_score", 0))))
     if data.get("verdict") not in ("apply", "maybe", "skip"):
         data["verdict"] = "maybe" if data["fit_score"] >= 60 else "skip"
