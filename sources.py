@@ -197,7 +197,7 @@ def fetch_workday(entry: dict, search_terms: list[str], max_pages: int, delay: f
                     id=f"wd:{tenant}:{path.rsplit('_', 1)[-1] or path}", source="workday", company=name,
                     title=p.get("title", ""), location=p.get("locationsText", ""),
                     url=f"https://{host}/en-US/{site}{path}", posted=workday_posted(p.get("postedOn", "")),
-                    detail={"api": f"{base}{path}"},
+                    detail={"api": f"{base}{path}", **({"gov": True} if entry.get("gov") else {})},
                 )
             time.sleep(delay)
             if len(postings) < 20 or (total is not None and (page + 1) * 20 >= total):

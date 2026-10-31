@@ -8,6 +8,7 @@ import time
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 import db
@@ -262,6 +263,19 @@ class CollectWorkdayTests(unittest.TestCase):
         self.assertEqual(set(seen), {(("software engineer", "devops engineer"), 2)})
         self.assertEqual(len(seen), 6)
 
+    def test_a_site_marked_gov_is_searched_with_government_titles_and_its_jobs_use_them(self):
+        seen = []
+
+        def fake(entry, terms, pages, delay):
+            seen.append((entry["tenant"], tuple(terms)))
+            return []
+
+        cfg = {"titles": ["Software Engineer"], "gov_titles": ["Programmer Analyst"], "workday_search_terms": "auto"}
+        entries = [{**e, "gov": True} if e["tenant"] == "s1" else e for e in self.ENTRIES[:3]]
+        with mock.patch.object(sources, "fetch_workday", fake), redirect_stdout(io.StringIO()):
+            main.collect_workday(cfg, entries, 0)
+        self.assertEqual(dict(seen), {"s0": ("software engineer",), "s1": ("software engineer", "programmer analyst"), "s2": ("software engineer",)})
+
 
 class CollectBoardsTests(unittest.TestCase):
     """Greenhouse / Lever / Ashby boards are read several at a time, results kept in config order."""
@@ -344,6 +358,60 @@ class ScoringTests(PipelineBase):
         self.assertEqual(scored, {"Co0", "Co1", "Co3", "Co4"})
         self.assertIn("error on Software Engineer 2: RuntimeError: overloaded", text)
         self.assertEqual(len(db.unscored(self.conn, 10)), 1)       # retried on the next run
+
+
+class GovTitleTests(PipelineBase):
+    def test_gov_flagged_jobs_match_government_titles_others_do_not(self):
+        cfg = {**CFG, "gov_titles": ["Programmer Analyst"]}
+        gov = wd("wd:uni:1", title="Programmer Analyst III", company="Uni")
+        gov.detail["gov"] = True
+        plain = wd("wd:corp:1", title="Programmer Analyst III", company="Corp")
+        self.run_pipeline([gov, plain], cfg=cfg)
+        self.assertEqual(self.stored(), {"wd:uni:1"})
+
+    def test_fetch_workday_marks_jobs_from_a_gov_site(self):
+        posting = [{"title": "Programmer", "externalPath": "/job/A/x_R1", "locationsText": "Austin, TX"}]
+        fake = SimpleNamespace(post=lambda url, json, timeout: SimpleNamespace(raise_for_status=lambda: None,
+                                                                            json=lambda: {"jobPostings": posting, "total": 1}))
+        with mock.patch.object(sources, "_session", lambda: fake):
+            jobs = sources.fetch_workday({"host": "h", "tenant": "t", "site": "s", "gov": True}, ["programmer"], 1, 0)
+            plain = sources.fetch_workday({"host": "h", "tenant": "t", "site": "s"}, ["programmer"], 1, 0)
+        self.assertTrue(jobs[0].detail["gov"])
+        self.assertNotIn("gov", plain[0].detail)
+
+
+class MissingAnthropicTests(PipelineBase):
+    def test_a_missing_package_stops_the_run_before_any_fetching(self):
+        fetched = []
+        with mock.patch.dict(os.environ, {"ANTHROPIC_API_KEY": "k"}), mock.patch.object(main, "load_env"),                 mock.patch.object(main, "collect", lambda *a, **k: fetched.append(1) or []),                 mock.patch.dict("sys.modules", {"anthropic": None}):          # makes `import anthropic` fail
+            with self.assertRaises(SystemExit) as ctx:
+                main.cmd_run(argparse.Namespace(no_llm=False, limit=None), CFG, {}, self.conn)
+        self.assertEqual(fetched, [])
+        self.assertIn("anthropic", str(ctx.exception))
+        self.assertIn("--no-llm", str(ctx.exception))
+
+    def test_no_llm_runs_do_not_need_the_package(self):
+        with mock.patch.dict("sys.modules", {"anthropic": None}):
+            self.run_pipeline([job("gh:a:1", company="A")])
+
+
+class ProgressTests(PipelineBase):
+    """The filtering stage prints how far along it is."""
+
+    def test_full_posting_lookups_report_every_ten_percent_and_the_end(self):
+        out = io.StringIO()
+        jobs = [wd(f"wd:s{i % 3}:{i}", company=f"C{i}") for i in range(20)]
+        for j in jobs:
+            j.detail = {"api": f"https://h{int(j.id.split(':')[1][1])}.example/api/{j.id}"}
+
+        def fill(j):
+            j.description = "x"
+
+        with mock.patch.object(sources, "fill_detail", fill), redirect_stdout(out):
+            main.prefetch_details(jobs, 3, 0)
+        lines = [l for l in out.getvalue().splitlines() if "full postings read" in l]
+        self.assertEqual(len(lines), 10)                    # 10%, 20% ... 100% for 20 postings
+        self.assertIn("[100%] full postings read: 20 of 20", lines[-1])
 
 
 if __name__ == "__main__":

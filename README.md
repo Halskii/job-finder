@@ -63,6 +63,7 @@ You can call the virtual environment's Python directly without activating it, fo
 | `python main.py list --top 15` | Best scored jobs from the database (`--min-score N` to change the cutoff) |
 | `python main.py mark <id> applied "note"` | Set a job's status. `<id>` can be any unique fragment of a job id. `applied` also records today as the date applied |
 | `python main.py discover Stripe "Palo Alto Networks"` | Look for those companies' job boards (see "Adding more boards"). Add `--add` to save what it finds, or `--file companies.txt` for a list |
+| `python main.py crawl --add` | Find company boards **in bulk** from Common Crawl's public web index, check each one, and save the ones with a posting matching your titles (see "Adding more boards") |
 | `python main.py workday-add <careers URL>` | Add a Workday careers site from any page address on it |
 | `python viewer.py` | Open the report viewer and application tracker in your browser (see below) |
 | `python inspect_db.py` | Peek at what is stored (`--where "california"` searches locations, `--odd` lists senior/staff/lead titles that slipped through) |
@@ -74,6 +75,8 @@ Typical first run: `profile` (review the diff, answer `y`), then `run`, then `vi
 
 ### Reading a run's output
 
+After the sources are read, the filtering stage reads the full text of postings that passed your filters (Workday and similar sites list only titles) and prints a line at every 10%, so a long wait there shows progress. A quiet stretch of more than a minute or two means something is stuck.
+
 Each source prints one line, for example `greenhouse stripe 747 postings`, or `skipped (...)` with the reason if it failed (a bad slug, a network error, a missing key). Then one summary line:
 
 `Fetched | title match | after location | excluded locations | already seen | duplicates | dropped by full location | too old | below pay | NEW`
@@ -82,15 +85,18 @@ Each number is how many postings were left or dropped at that step; `NEW` is wha
 
 ## Adding more boards
 
-Postings come from public job-board data that companies publish themselves: **Greenhouse, Lever, Ashby, SmartRecruiters, and Workday**, plus the **Remotive** remote-jobs feed and two government sources (below). The more companies you add, the more postings are searched.
+Postings come from public job-board data that companies publish themselves, from the applicant-tracking systems they use: **Greenhouse, Lever, Ashby, SmartRecruiters, Workable, Recruitee, BambooHR, Rippling, Gem, Personio, and Workday**. On top of that are seven aggregator feeds (below) and two government sources. The more companies you add, the more postings are searched.
+
+Sites that forbid bots in their terms or `robots.txt` (LinkedIn, Indeed, Glassdoor, ZipRecruiter, WorkInTexas, governmentjobs.com) are not used. Most of their postings are copies of ones on the company's own board, which is where this program reads them.
 
 - **`discover`** guesses a company's board address from its name and tries Greenhouse, Lever, Ashby, and SmartRecruiters. For each one it finds, it shows how many postings the board has, how many match your title, location, and pay filters, and one example posting with its link. **Check the example is the company you meant**, since a short name can match someone else's board. Nothing is saved until you run it again with `--add`. A name it can't find is usually a company on Workday or its own system, or one whose board name differs from its brand: for SmartRecruiters you can pass the exact id, for example `discover BoschGroup`.
+- **`crawl`** finds boards in bulk, with no company names needed. [Common Crawl](https://commoncrawl.org) publishes a free index of web addresses, and every company on Greenhouse, Ashby, Workday and the rest has addresses such as `boards.greenhouse.io/<company>/jobs/123`. `crawl` lists those, takes the company name out of each, asks the platform's own job API whether the board exists, and keeps boards that currently list a posting matching your titles and locations (`--keep-all` keeps every live board). Run `python main.py crawl` first to see what it would add, then `python main.py crawl --add` to save. `--systems greenhouse,ashby` limits it to some platforms and `--crawls N` reads more or fewer recent crawls (default 4; more crawls find more boards). Common Crawl's index is a shared free service that answers slowly and sometimes refuses connections, so the program reads it gently (one page every couple of seconds) and a platform it cannot read is skipped with a note. If it keeps refusing you, wait an hour or so and run it again; that is not an error in your setup. It remembers what it has read and checked in `crawl_cache.json`, so running it again only does new work; boards that failed are asked again after 14 days, or at once with `--recheck`. Re-run it now and then: a board only joins your list when it has a matching posting on the day it is checked.
 - **`workday-add`**: open the company's careers page, click any job, copy the address from the browser bar, and run `python main.py workday-add "<address>"`. It reads the host, tenant, and site out of the address, confirms the site responds, and saves it. Use `--name "Company"` for a nicer label.
 - Boards added this way are stored in `discovered_sources.yaml` and merged with `sources` in `config.yaml` each run, so `config.yaml` and its comments are never rewritten. You can also add slugs to `config.yaml` by hand, including a `smartrecruiters:` list (`jobs.smartrecruiters.com/<CompanyId>`, not case sensitive).
-- **Remotive** (`feeds.remotive` in `config.yaml`): remote jobs, limited to the categories you list. Its terms ask for no more than about four requests a day, so it is fetched at most once every `min_hours` (default 6) no matter how often you run the program. Its job links go to remotive.com, as its terms require.
+- **Feeds** (`feeds:` in `config.yaml`, each on with `enabled: true`): Remotive, Remote OK, We Work Remotely, Jobicy, Working Nomads, Himalayas, and the monthly **Hacker News "Who is hiring?"** threads (one job per top-level comment, read from the first line `Company | Role | Location`). Jobicy and Himalayas are searched with your title words (Himalayas has over 100,000 postings, so it can't be read whole). Two broad aggregators, **Adzuna** and **Jooble**, are off until you add a free key to `.env` and set `enabled: true` (they return only a short snippet of each description, so scoring has less to go on). Each feed is fetched at most once every `min_hours` (default 6; Remotive asks for no more than about four requests a day) no matter how often you run the program. Every feed's job links go to its own site, as the terms of each require, and a job's `source` names it.
 - **Duplicates:** if the same company and title is already stored from a different source, for example a job on both a company's board and Remotive, the second copy is skipped (shown as `duplicates` in the run summary). The same title in two different cities from one source is kept, because those are separate postings.
-- **Many Workday sites:** `workday-add` and `discovery` can build a list of a hundred or more sites. Sites are read several at a time (`workday_workers`), each with one request at a time. A first run over ~100 sites read 22,000 postings and stored ~700 new matches; each run prints how long listing, full-posting lookups, and scoring took. Later runs only fetch details for postings not yet stored, so they are faster. With that many sites, use a short `workday_search_terms` list rather than `auto`.
-- Not included: Adzuna (needs a free key), Oracle and iCIMS career sites (no clean public data), and Workable (its old public endpoint now returns nothing).
+- **Many Workday sites:** `workday-add` and `discovery` can build a list of a hundred or more sites. Sites are read several at a time (`workday_workers`), each with one request at a time. A first run over ~100 sites read 22,000 postings and stored ~700 new matches. With the Workday sites plus about 1,400 Greenhouse, Ashby and SmartRecruiters boards from `crawl` and the feeds, a first run read about 114,000 postings and stored about 2,200 matches in under ten minutes; each run prints how long listing, full-posting lookups, and scoring took. Later runs only fetch details for postings not yet stored, so they are faster. With that many sites, use a short `workday_search_terms` list rather than `auto`.
+- Not included: Breezy (its postings are drawn by JavaScript, so there is no text to read), Adzuna and The Muse (need a key), and Oracle, iCIMS, Taleo, and SuccessFactors career sites (no uniform public data).
 
 ### Government jobs (on by default)
 
@@ -157,6 +163,9 @@ How it works:
 |---|---|
 | `main.py` | Command-line entry point and pipeline |
 | `sources.py` | Job-board fetchers (Greenhouse, Lever, Ashby, SmartRecruiters, Workday, Remotive) and pay parsing |
+| `ats_sources.py` | More applicant-tracking systems: Workable, Recruitee, BambooHR, Rippling, Gem, Personio |
+| `feed_sources.py` | Aggregator feeds: Remote OK, We Work Remotely, Jobicy, Working Nomads, Himalayas, Hacker News "Who is hiring?" |
+| `crawl.py` | Bulk board discovery from Common Crawl's public index (the `crawl` command) |
 | `gov_sources.py` | Government sources: USAJobs (federal API) and Texas HHS careers |
 | `discovery.py` | Board discovery from company names, Workday address parsing, and merging `discovered_sources.yaml` |
 | `filters.py` | Title, location, pay, and age filters, plus the keyword pre-score |
@@ -167,7 +176,8 @@ How it works:
 | `inspect_db.py` | Quick look at what is stored |
 | `config.example.yaml`, `profile.example.json`, `.env.example` | Templates to copy (see Setup) |
 | `config.yaml`, `profile.json`, `.env` | Your own settings, verified facts, and keys. Git-ignored; never commit them |
-| `discovered_sources.yaml` | Boards added by `discover --add` and `workday-add` (created on first use, git-ignored) |
+| `discovered_sources.yaml` | Boards added by `discover --add`, `workday-add` and `crawl --add` (created on first use, git-ignored) |
+| `crawl_cache.json` | What `crawl` has already read and checked, so reruns are quick (git-ignored; safe to delete) |
 | `jobs.db`, `reports/` | Stored postings, scores, and the tracker; daily Markdown reports (git-ignored) |
 | `LICENSE` | All rights reserved: viewable for evaluation, not for reuse |
 | `tests/` | Offline tests (`tests/data/` holds a saved page sample). Run with `python -m unittest` |

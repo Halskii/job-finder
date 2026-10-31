@@ -12,17 +12,25 @@ from urllib.parse import urlparse
 import requests
 import yaml
 
+import ats_sources
 import filters
 import sources
 
 DISCOVERED_FILE = "discovered_sources.yaml"
 # system name -> fetcher. Order is the order they are tried and shown.
-SYSTEMS = [
-    ("greenhouse", sources.fetch_greenhouse),
-    ("lever", sources.fetch_lever),
-    ("ashby", sources.fetch_ashby),
-    ("smartrecruiters", sources.fetch_smartrecruiters),
+BOARD_FETCHERS = [   # (system, module, function name): the function is looked up when used, so tests can replace it
+    ("greenhouse", sources, "fetch_greenhouse"),
+    ("lever", sources, "fetch_lever"),
+    ("ashby", sources, "fetch_ashby"),
+    ("smartrecruiters", sources, "fetch_smartrecruiters"),
+    ("workable", ats_sources, "fetch_workable"),
+    ("recruitee", ats_sources, "fetch_recruitee"),
+    ("bamboohr", ats_sources, "fetch_bamboohr"),
+    ("rippling", ats_sources, "fetch_rippling"),
+    ("gem", ats_sources, "fetch_gem"),
+    ("personio", ats_sources, "fetch_personio"),
 ]
+SYSTEMS = [(name, getattr(mod, fn)) for name, mod, fn in BOARD_FETCHERS]
 LIST_KEYS = tuple(k for k, _ in SYSTEMS)
 COMPANY_SUFFIXES = {"inc", "llc", "ltd", "corp", "corporation", "co", "company", "plc", "the"}
 LOCALE_RE = re.compile(r"^[a-z]{2}(?:-[A-Za-z]{2})?$")

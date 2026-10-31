@@ -12,6 +12,7 @@ import json
 import os
 import re
 import sys
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date
@@ -22,6 +23,7 @@ import yaml
 
 import db
 import discovery
+import feed_sources
 import filters
 import gov_sources
 import scorer
@@ -81,9 +83,9 @@ def collect(cfg: dict, conn=None) -> list[sources.Job]:
     delay = cfg.get("request_delay", 0.4)
     src = cfg.get("sources", {})
     jobs: list[sources.Job] = []
-    plan = [("greenhouse", sources.fetch_greenhouse), ("lever", sources.fetch_lever), ("ashby", sources.fetch_ashby),
-            ("smartrecruiters", sources.fetch_smartrecruiters)]
+    plan = [(kind, getattr(mod, fn)) for kind, mod, fn in discovery.BOARD_FETCHERS]
     tasks = [(kind, fn, slug) for kind, fn in plan for slug in src.get(kind, []) or []]
+    workday = src.get("workday", []) or []
 
     def one(task):
         kind, fn, slug = task
@@ -94,15 +96,19 @@ def collect(cfg: dict, conn=None) -> list[sources.Job]:
         finally:
             time.sleep(delay)
 
-    # The boards are small, separate lists, so several are read at once. pool.map keeps them in config order.
+    # The boards are small, separate lists, so several are read at once. Lines print as boards finish; jobs keep config order.
     with ThreadPoolExecutor(max_workers=max(1, int(cfg.get("fetch_workers", 8)))) as pool:
-        for kind, slug, got, err in pool.map(one, tasks):
+        futures = [pool.submit(one, t) for t in tasks]
+        results = {}
+        for fut in as_completed(futures):
+            kind, slug, got, err = results[id(fut)] = fut.result()
             if err:
                 log(f"  {kind:10s} {slug:18s} skipped ({type(err).__name__}: {str(err)[:70]})")
             else:
                 log(f"  {kind:10s} {slug:18s} {len(got):4d} postings")
-                jobs += got
-    jobs += collect_workday(cfg, src.get("workday", []) or [], delay)
+        for f in futures:
+            jobs += results[id(f)][2]
+    jobs += collect_workday(cfg, workday, delay)
     jobs += collect_feeds(cfg, conn)
     jobs += collect_government(cfg)
     return jobs
@@ -112,22 +118,27 @@ def collect_workday(cfg: dict, entries: list[dict], delay: float) -> list[source
     """Read every Workday site. Sites are different servers, so several are read at once (`workday_workers`, default 16);
     each site is still read one request at a time, with `request_delay` between requests."""
     terms, pages = filters.workday_terms(cfg), cfg.get("workday_max_pages", 3)
+    gov_terms = terms + [t for t in filters.base_title_strings(cfg.get("gov_titles", [])) if t not in terms]
 
     def one(entry):
-        try:
-            return entry, sources.fetch_workday(entry, terms, pages, delay), None
+        try:   # an entry marked `gov: true` (a city, university, or agency) is also searched with the government titles
+            return entry, sources.fetch_workday(entry, gov_terms if entry.get("gov") else terms, pages, delay), None
         except Exception as e:   # a site that is down or renamed must not stop the others
             return entry, [], e
 
     jobs: list[sources.Job] = []
     with ThreadPoolExecutor(max_workers=max(1, int(cfg.get("workday_workers", 16)))) as pool:
-        for entry, got, err in pool.map(one, entries):
+        futures = [pool.submit(one, e) for e in entries]
+        done = {}
+        for fut in as_completed(futures):
+            entry, got, err = done[id(fut)] = fut.result()
             name = entry.get("name", entry["tenant"])
             if err:
                 log(f"  workday    {name:18s} skipped ({type(err).__name__}: {str(err)[:70]})")
             else:
                 log(f"  workday    {name:18s} {len(got):4d} postings")
-                jobs += got
+        for f in futures:   # keep the order of the list, whatever order the sites finished in
+            jobs += done[id(f)][1]
     return jobs
 
 
@@ -138,6 +149,18 @@ def prefetch_details(jobs: list[sources.Job], workers: int, delay: float) -> set
     for j in jobs:
         by_host.setdefault(urlparse(j.detail.get("api") or j.url).netloc, []).append(j)
 
+    lock = threading.Lock()
+    state = {"done": 0, "next": 10}
+
+    def advance() -> None:
+        with lock:
+            state["done"] += 1
+            pct = 100 * state["done"] // len(jobs)
+            if pct >= state["next"] or state["done"] == len(jobs):
+                while state["next"] <= pct:
+                    state["next"] += 10
+                log(f"  [{min(pct, 100):3d}%] full postings read: {state['done']} of {len(jobs)}")
+
     def fetch_group(group):
         bad = []
         for j in group:
@@ -145,6 +168,7 @@ def prefetch_details(jobs: list[sources.Job], workers: int, delay: float) -> set
                 sources.fill_detail(j)
             except Exception:
                 bad.append(j.id)
+            advance()
             time.sleep(delay)
         return bad
 
@@ -166,7 +190,7 @@ def collect_government(cfg: dict) -> list[sources.Job]:
         load_env()
         key, email = os.environ.get("USAJOBS_API_KEY"), os.environ.get("USAJOBS_EMAIL")
         if not (key and email):
-            log("  usajobs    skipped (add USAJOBS_API_KEY and USAJOBS_EMAIL to .env; free key at developer.usajobs.gov/apirequest)")
+            log(f"  usajobs    skipped (add USAJOBS_API_KEY and USAJOBS_EMAIL to .env; free key at developer.usajobs.gov/apirequest)")
         else:
             try:
                 got = gov_sources.fetch_usajobs(key, email, uj.get("keywords", ["software developer"]),
@@ -188,27 +212,77 @@ def collect_government(cfg: dict) -> list[sources.Job]:
     return jobs
 
 
+def _feed_terms(feed: dict, cfg: dict) -> list[str]:
+    return list(feed.get("terms") or filters.workday_terms(cfg))
+
+
+# name -> (label for the log, function(feed settings, whole config) -> jobs). Looked up when called, so tests can replace them.
+FEEDS = {
+    "remotive": lambda f, cfg: sources.fetch_remotive(f.get("categories", ["software-development"])),
+    "remoteok": lambda f, cfg: feed_sources.fetch_remoteok(),
+    "weworkremotely": lambda f, cfg: feed_sources.fetch_weworkremotely(
+        f.get("categories", ["remote-programming-jobs", "remote-devops-sysadmin-jobs", "remote-back-end-programming-jobs"])),
+    "jobicy": lambda f, cfg: feed_sources.fetch_jobicy(_feed_terms(f, cfg)),
+    "workingnomads": lambda f, cfg: feed_sources.fetch_workingnomads(),
+    "himalayas": lambda f, cfg: feed_sources.fetch_himalayas(_feed_terms(f, cfg), f.get("pages", 2)),
+    "hackernews": lambda f, cfg: feed_sources.fetch_hn_hiring(f.get("threads", 2)),
+    "adzuna": lambda f, cfg: feed_sources.fetch_adzuna(os.environ["ADZUNA_APP_ID"], os.environ["ADZUNA_APP_KEY"], _feed_terms(f, cfg),
+                                                       cfg.get("max_age_days", 30), f.get("pages", 2)),
+    "jooble": lambda f, cfg: feed_sources.fetch_jooble(os.environ["JOOBLE_API_KEY"], _feed_terms(f, cfg), f.get("pages", 2)),
+}
+# feeds that need a free key: environment variables and where to get one
+FEED_KEYS = {"adzuna": (("ADZUNA_APP_ID", "ADZUNA_APP_KEY"), "free keys at developer.adzuna.com"),
+             "jooble": (("JOOBLE_API_KEY",), "a free key on request at jooble.org/api/about")}
+
+
 def collect_feeds(cfg: dict, conn) -> list[sources.Job]:
-    """Aggregator feeds. Remotive asks for at most about four requests a day, so it is fetched at most once per
-    `min_hours` (default 6), tracked in the database. Job pages link back to Remotive, as their terms require."""
-    rem = (cfg.get("feeds") or {}).get("remotive") or {}
-    if not rem.get("enabled") or conn is None:
-        return []
-    gap = float(rem.get("min_hours", 6)) * 3600
-    if time.time() - float(db.get_meta(conn, "remotive_last_fetch") or 0) < gap:
-        log("  remotive   skipped (fetched recently; Remotive asks for at most about 4 requests a day)")
-        return []
-    db.set_meta(conn, "remotive_last_fetch", str(time.time()))   # recorded before the call so failures don't cause retries
+    """Aggregator feeds, each on only when `enabled: true` under `feeds:`. Remotive asks for at most about four requests a
+    day; the others ask not to be polled constantly. So each feed is fetched at most once per its `min_hours` (default 6),
+    tracked in the database. Job pages link back to the feed's own site, as their terms require."""
+    jobs: list[sources.Job] = []
+    if conn is None:
+        return jobs
+    for name, fetch in FEEDS.items():
+        feed = (cfg.get("feeds") or {}).get(name) or {}
+        if not feed.get("enabled"):
+            continue
+        if name in FEED_KEYS:
+            load_env()
+            names, where = FEED_KEYS[name]
+            if not all(os.environ.get(n) for n in names):
+                log(f"  {name:14s} skipped (add {' and '.join(names)} to .env; {where})")
+                continue
+        gap = float(feed.get("min_hours", 6)) * 3600
+        if time.time() - float(db.get_meta(conn, f"{name}_last_fetch") or 0) < gap:
+            log(f"  {name:14s} skipped (fetched recently; it is fetched at most once every {feed.get('min_hours', 6)} hours)")
+            continue
+        db.set_meta(conn, f"{name}_last_fetch", str(time.time()))   # recorded before the call so failures don't cause retries
+        try:
+            got = fetch(feed, cfg)
+            log(f"  {name:14s} {'(feed)':14s} {len(got):4d} postings")
+            jobs += got
+        except Exception as e:
+            log(f"  {name:14s} {'(feed)':14s} skipped ({type(e).__name__}: {str(e)[:70]})")
+    return jobs
+
+
+def require_anthropic() -> None:
+    """Scoring needs the `anthropic` package. Check before a long fetch, not after it, and say which Python is missing it."""
     try:
-        got = sources.fetch_remotive(rem.get("categories", ["software-development"]))
-        log(f"  remotive   {'(feed)':18s} {len(got):4d} postings")
-        return got
-    except Exception as e:
-        log(f"  remotive   {'(feed)':18s} skipped ({type(e).__name__}: {str(e)[:70]})")
-        return []
+        import anthropic  # noqa: F401
+    except ImportError:
+        venv = ROOT / ".venv" / "Scripts" / "python.exe"
+        hint = (f"This project has a virtual environment with it installed. Run:  {venv.relative_to(ROOT)} main.py run"
+                if venv.exists() else "Install it with:  pip install -r requirements.txt")
+        sys.exit(f"The 'anthropic' package is not installed for the Python running this ({sys.executable}).\n{hint}\n"
+                 f"Nothing was fetched. (Fetch only, with no scoring, works without it:  main.py run --no-llm)")
 
 
 def cmd_run(args, cfg, profile, conn) -> None:
+    if not args.no_llm:
+        load_env()
+        if os.environ.get("ANTHROPIC_API_KEY"):   # without a key, scoring is skipped anyway
+            require_anthropic()
     log("Fetching postings...")
     t0 = time.time()
     jobs = collect(cfg, conn)
@@ -219,9 +293,11 @@ def cmd_run(args, cfg, profile, conn) -> None:
     loc_excl = filters.compile_exclusions(cfg.get("exclude_locations", []))
     stats = {"fetched": len(jobs), "title": 0, "location": 0, "excluded": 0, "pay": 0, "age": 0, "new": 0, "seen": 0, "dupe": 0, "late": 0}
 
+    log(f"\nFiltering {len(jobs):,} postings...")
     candidates = []
     for job in jobs:
-        if not filters.title_ok(job.title, gov_patterns if job.source in gov_sources.GOV_SOURCES else patterns, exclude):
+        use_gov = job.source in gov_sources.GOV_SOURCES or job.detail.get("gov")
+        if not filters.title_ok(job.title, gov_patterns if use_gov else patterns, exclude):
             continue
         stats["title"] += 1
         if not filters.location_ok(job.location, cfg.get("us_only", True)):
@@ -242,6 +318,8 @@ def cmd_run(args, cfg, profile, conn) -> None:
     # above, and are not already stored from another source, are looked up, several servers at a time.
     need = [j for j in candidates if j.source in sources.DETAIL_FILLERS and not db.is_cross_source_duplicate(conn, j)]
     t1 = time.time()
+    if need:
+        log(f"Reading the full text of {len(need)} postings that passed the filters (these sites list only titles)...")
     failed = prefetch_details(need, cfg.get("detail_workers", 16), cfg.get("request_delay", 0.4)) if need else set()
     t_detail = time.time() - t1
 
@@ -404,6 +482,43 @@ def cmd_discover(args, cfg, profile, conn) -> None:
             f"then run again with --add.")
 
 
+def cmd_crawl(args, cfg, profile, conn) -> None:
+    """Find company boards in bulk from Common Crawl's public web index, check each against the platform's job API, and
+    keep the ones that list a posting matching your titles. Saves only with --add."""
+    import crawl
+
+    systems = [s.strip() for s in args.systems.split(",")] if args.systems else list(crawl.PATTERNS)
+    bad = [s for s in systems if s not in crawl.PATTERNS]
+    if bad:
+        sys.exit(f"Unknown platform(s): {', '.join(bad)}. Choose from: {', '.join(crawl.PATTERNS)}")
+    ids = crawl.resolve_ids(ROOT, args.crawls, log)
+    if not ids:
+        log("Common Crawl's index is not answering right now, so no boards could be looked up. Nothing is wrong with your setup and "
+            "nothing was lost. It is a shared free service that sometimes refuses connections for a while after heavy use. "
+            "Try again in an hour or so; the command picks up where it stopped.")
+        return
+    total, problems = 0, []
+    for system in systems:
+        log(f"\n{system}: reading Common Crawl's index ({args.crawls} recent crawls)...")
+        cands = crawl.enumerate_candidates(ROOT, [system], args.crawls, log, ids=ids, problems=problems)[system]
+        have = crawl.known_keys(cfg.get("sources"), system)
+        ident = crawl._workday_id if system == "workday" else crawl._key
+        fresh = [c for c in cands if ident(c) not in have]
+        log(f"  {len(cands)} boards found, {len(cands) - len(fresh)} already in your sources, {len(fresh)} to check")
+        kept = crawl.validate(system, fresh, cfg, args.keep_all, int(cfg.get("crawl_workers", 16)), log, ROOT, 0 if args.recheck else 14)
+        total += len(kept)
+        if kept and args.add:
+            discovery.save_discovered(ROOT, {system: kept})
+            log(f"  saved {len(kept)} {system} board(s) to {discovery.DISCOVERED_FILE}")
+    if problems:
+        log(f"\nThe index stopped answering while reading: {', '.join(dict.fromkeys(problems))}. Those were only partly read; "
+            f"run the command again later to read the rest.")
+    if not args.add:
+        log(f"\n{total} new board(s) found, nothing saved. Run again with --add to keep them (checked boards are remembered, so it is quick).")
+    else:
+        log(f"\nDone: {total} new board(s) saved. They are searched on the next `run`.")
+
+
 def cmd_workday_add(args, cfg, profile, conn) -> None:
     """Add a Workday careers site from any page address on it."""
     try:
@@ -486,6 +601,13 @@ def main() -> None:
     d.add_argument("names", nargs="*", help="company names")
     d.add_argument("--file", help="text file with one company name per line")
     d.add_argument("--add", action="store_true", help="save the boards it finds")
+    c = sub.add_parser("crawl", help="find company boards in bulk from Common Crawl's public index (Greenhouse, Workday, ...)")
+    c.add_argument("--systems", help="comma-separated platforms (default: all). Choices: greenhouse, lever, ashby, smartrecruiters, "
+                                     "workable, recruitee, bamboohr, rippling, gem, personio, workday")
+    c.add_argument("--crawls", type=int, default=4, help="how many recent Common Crawl crawls to read (default 4)")
+    c.add_argument("--keep-all", action="store_true", help="keep every live board, not only those with a posting matching your titles")
+    c.add_argument("--recheck", action="store_true", help="ask boards that were checked recently again")
+    c.add_argument("--add", action="store_true", help="save the boards it finds")
     w = sub.add_parser("workday-add", help="add a Workday careers site from its web address")
     w.add_argument("url")
     w.add_argument("--name", help="label to show for the company")
@@ -500,7 +622,7 @@ def main() -> None:
     profile = json.loads((ROOT / "profile.json").read_text(encoding="utf-8"))
     conn = db.connect(str(ROOT / "jobs.db"))
     {"run": cmd_run, "list": cmd_list, "mark": cmd_mark, "profile": cmd_profile,
-     "discover": cmd_discover, "workday-add": cmd_workday_add}[args.cmd](args, cfg, profile, conn)
+     "discover": cmd_discover, "workday-add": cmd_workday_add, "crawl": cmd_crawl}[args.cmd](args, cfg, profile, conn)
 
 
 if __name__ == "__main__":
