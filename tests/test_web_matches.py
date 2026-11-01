@@ -1,5 +1,6 @@
 """The live match list and its progress, over HTTP."""
 import json
+import os
 import tempfile
 import unittest
 import urllib.error
@@ -67,11 +68,30 @@ class MatchesWebTests(unittest.TestCase):
         self.assertGreater(st["left_today"], 0)
         self.assertEqual(self.call("GET", "/api/matches/status", token=self.site.token)[1]["state"], "idle")      # not the other user's progress
 
-    def test_asking_for_a_check_queues_a_run_for_that_user_only(self):
-        with mock.patch.object(web, "RUNS", True), mock.patch.object(pipeline.WORKER, "submit") as submit:
-            status, st = self.call("POST", "/api/matches/refresh", {}, token=self.other_token)
-        self.assertEqual((status, st["state"]), (200, "queued"))
-        submit.assert_called_once_with(self.other_id)
+    def test_people_cannot_start_a_search_themselves_by_default(self):
+        with mock.patch.dict(os.environ, {"MANUAL_REFRESH": ""}), mock.patch.object(web, "RUNS", True), mock.patch.object(pipeline.WORKER, "submit") as submit:
+            status, body = self.call("POST", "/api/matches/refresh", {}, token=self.other_token)
+            st = self.call("GET", "/api/matches/status", token=self.other_token)[1]
+        self.assertEqual((status, body["code"]), (403, "refresh_off"))
+        self.assertTrue(body["error"].endswith("."))
+        submit.assert_not_called()                                                   # nothing was queued, so nothing can be spent
+        self.assertIs(st["can_refresh"], False)                                      # and the page is told not to show the link
+
+    def test_with_the_switch_on_asking_for_a_check_queues_a_run_for_that_user_only(self):
+        for value in ("on", "1", "true"):
+            with mock.patch.dict(os.environ, {"MANUAL_REFRESH": value}), mock.patch.object(web, "RUNS", True), mock.patch.object(pipeline.WORKER, "submit") as submit:
+                status, st = self.call("POST", "/api/matches/refresh", {}, token=self.other_token)
+            self.assertEqual((status, st["state"], st["can_refresh"]), (200, "queued", True), value)
+            submit.assert_called_once_with(self.other_id)
+        with mock.patch.dict(os.environ, {"MANUAL_REFRESH": "off"}):
+            self.assertEqual(self.call("POST", "/api/matches/refresh", {}, token=self.other_token)[0], 403)
+
+    def test_saving_a_profile_still_starts_the_search_whatever_the_switch_says(self):
+        uid, token = self.site.new_user("saver2@example.com")
+        with mock.patch.dict(os.environ, {"MANUAL_REFRESH": ""}), mock.patch.object(web, "RUNS", True), mock.patch.object(pipeline.WORKER, "submit") as submit:
+            status, _ = self.call("POST", "/api/profile/save", {"settings": {"titles": ["Dev"]}, "profile": {"name": "S"}}, token=token)
+        self.assertEqual(status, 200)
+        submit.assert_called_once_with(uid)
 
     def test_saving_a_profile_starts_the_search(self):
         uid, token = self.site.new_user("saver@example.com")
@@ -88,7 +108,7 @@ class MatchesWebTests(unittest.TestCase):
         req = urllib.request.Request(self.base + "/", headers={"Cookie": f"{web.COOKIE}={self.site.token}"})
         with urllib.request.urlopen(req) as r:
             page = r.read().decode("utf-8")
-        for needle in ("Current matches", "/api/matches/status", "Scoring your matches", "Check for new jobs"):
+        for needle in ("Current matches", "/api/matches/status", "Scoring your matches", "Check for new jobs", "s.can_refresh?[again]:[]"):
             self.assertIn(needle, page)
 
 

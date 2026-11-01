@@ -21,3 +21,6 @@ __pycache__/
 
 # Each user's own files (profile, resume, reports, generated resumes)
 data/
+
+# Database dumps (they hold people's data)
+*.dump

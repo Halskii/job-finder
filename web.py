@@ -426,18 +426,31 @@ def matches(user: dict = Depends(current_user)):
     return viewer.load_matches(user["id"])
 
 
-@app.get("/api/matches/status")
-def matches_status(user: dict = Depends(current_user)):
-    conn = viewer._db(user["id"])
+def refresh_allowed() -> bool:
+    """Whether people can start a new search themselves (the "Check for new jobs" link). Off unless MANUAL_REFRESH is on: each search can
+    score jobs with Claude, which costs money, so on the deployed site new jobs are found automatically once a day instead."""
+    return os.environ.get("MANUAL_REFRESH", "").strip().lower() in ("1", "on", "true", "yes")
+
+
+def run_status(uid: int) -> dict:
+    """This user's search progress, plus whether they may start a new search by hand."""
+    conn = viewer._db(uid)
     try:
-        return pipeline.status(conn)
+        return {**pipeline.status(conn), "can_refresh": refresh_allowed()}
     finally:
         conn.close()
 
 
+@app.get("/api/matches/status")
+def matches_status(user: dict = Depends(current_user)):
+    return run_status(user["id"])
+
+
 @app.post("/api/matches/refresh")
 def matches_refresh(user: dict = Depends(current_user)):
-    """Look for new jobs that fit this person's search, and score them."""
+    """Look for new jobs that fit this person's search, and score them. Refused unless MANUAL_REFRESH is on."""
+    if not refresh_allowed():
+        raise Problem(403, "New jobs are found automatically once a day.", "refresh_off")
     return start_run(user["id"])
 
 
@@ -445,11 +458,7 @@ def start_run(uid: int) -> dict:
     """Queue a run for this user and return their status (which says 'queued' at once)."""
     if RUNS:
         pipeline.request(uid)
-    conn = viewer._db(uid)
-    try:
-        return pipeline.status(conn)
-    finally:
-        conn.close()
+    return run_status(uid)
 
 
 @app.get("/api/tracker")
