@@ -760,7 +760,7 @@ function route(){
     buttons.append(el("button",{className:"btn apply",textContent:"Mark as applied",title:"Adds this job to the tracker with today's date",onclick:()=>setStatus(j,"applied",true)}));
   }
   const note=el("div",{className:"muted",id:"tailor-note",style:"margin:-4px 0 8px"});
-  const tailorBtn=el("button",{className:"btn",id:"tailor-btn",textContent:TAILOR_LABEL,title:"Uses Claude (Fable 5.1) to rewrite your resume for this posting and write a cover letter, saved as PDFs in the Optimized Resumes folder. Costs a few cents to under a dollar.",onclick:()=>askTailor(j)});
+  const tailorBtn=el("button",{className:"btn",id:"tailor-btn",textContent:TAILOR_LABEL,title:"Uses Claude (Fable 5.1) to rewrite your resume for this posting and write a cover letter, saved as PDFs and editable Word files in the Optimized Resumes folder. Costs a few cents to under a dollar.",onclick:()=>askTailor(j)});
   buttons.append(tailorBtn);
   buttons.append(el("button",{className:"btn",textContent:"Interview prep",
     title:"How the interview for this role and company usually runs, what to study, and what to ask. Uses Claude once (about 3 cents); the answer is saved in your Interview Prep list, so opening it again is free.",
@@ -836,7 +836,7 @@ async function tailorJob(j,resume_request,letter_request){
   try{
     const d=await post("/api/tailor",{id:j.id,resume_request,letter_request});
     const long=Object.entries(d.pages).filter(([k,n])=>n>1).map(([k])=>k.replace("_"," "));
-    message="Saved to Optimized Resumes: "+d.files.join(", ")+(long.length?" (the "+long.join(" and ")+" runs past one page; trim it before sending)":"");
+    message="Saved to Optimized Resumes: "+d.files.join(", ")+" (each also saved as an editable Word file)"+(long.length?" (the "+long.join(" and ")+" runs past one page; trim it before sending)":"");
   }catch(e){fail("Couldn't write your resume and cover letter",e);message="That didn't finish. "+friendly(e)}
   tailorState[j.id]={running:false,message};paintTailor(j.id);
 }

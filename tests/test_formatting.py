@@ -3,7 +3,10 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
+
+import requests
 
 import db
 import reformat
@@ -110,9 +113,9 @@ class RestoreTests(unittest.TestCase):
             self.assertFalse(reformat.reformat_job(self.conn, "gh:acme:9")["updated"])
         with mock.patch.object(sources, "fetch_greenhouse", return_value=[]):
             self.assertFalse(reformat.reformat_job(self.conn, "gh:acme:9")["updated"])
-        self.add("rp:acme:1", 0)
+        self.add("us:acme:1", 0)
         with mock.patch.object(sources, "fetch_greenhouse") as f:
-            self.assertFalse(reformat.reformat_job(self.conn, "rp:acme:1")["updated"])
+            self.assertFalse(reformat.reformat_job(self.conn, "us:acme:1")["updated"])
             f.assert_not_called()
         self.assertEqual(self.conn.execute("SELECT description FROM jobs WHERE id='gh:acme:9'").fetchone()[0], "Plain text")
         with self.assertRaises(LookupError):
@@ -128,6 +131,17 @@ class RestoreTests(unittest.TestCase):
             res = reformat.reformat_job(self.conn, "wd:acme:R-1")
         self.assertEqual(asked, ["https://acme.wd5.myworkdayjobs.com/wday/cxs/acme/acme_external/job/Austin-TX/Engineer_R-1"])
         self.assertEqual(res["description"], "**Duties**\n\n- Build\n- Ship")
+
+    def test_a_workday_403_means_taken_down_and_is_not_warned_about_or_asked_again(self):
+        url = "https://acme.wd5.myworkdayjobs.com/en-US/acme_external/job/Austin-TX/Engineer_R-1"
+        db.add_job(self.conn, sources.Job("wd:acme:R-1", "workday", "Acme", "Engineer", "Austin", url, description="Plain text"), 1.0)
+        self.conn.execute("UPDATE jobs SET formatted=0"); self.conn.commit()
+        forbidden = requests.HTTPError("403 Client Error", response=SimpleNamespace(status_code=403))
+        with mock.patch.object(sources, "_get", side_effect=forbidden), self.assertNoLogs("job-finder", level="WARNING"):
+            self.assertEqual(reformat.restore_all(self.conn, delay=0), {"restored": 0, "gone": 1, "failed": 0})
+        self.assertEqual(self.conn.execute("SELECT formatted FROM jobs WHERE id='wd:acme:R-1'").fetchone()[0], 2)
+        self.assertTrue(reformat._is_gone(forbidden, "wd"))
+        self.assertFalse(reformat._is_gone(forbidden, "gh"))   # a 403 from any other source is still worth retrying
 
     def test_a_himalayas_posting_is_found_again_by_its_title(self):
         db.add_job(self.conn, sources.Job("hm:devops:blue-pearl", "himalayas", "Blue Pearl", "DevOps engineer", "Remote", "https://himalayas.app/x",
@@ -153,7 +167,7 @@ class RestoreTests(unittest.TestCase):
         self.assertEqual(res["description"], "Build **things**\n\n- One\n\n- Python")
 
     def test_everything_waiting_is_restored_best_first_with_one_request_per_board(self):
-        for jid, score in (("gh:acme:1", 50), ("gh:acme:2", 90), ("ab:other:7", 70), ("wd:big:R-1", 60), ("rp:skip:1", 99)):
+        for jid, score in (("gh:acme:1", 50), ("gh:acme:2", 90), ("ab:other:7", 70), ("wd:big:R-1", 60), ("us:skip:1", 99)):
             self.add(jid, 0)
             self.conn.execute("UPDATE jobs SET score=?, url=? WHERE id=?", (score, "https://big.wd5.myworkdayjobs.com/en-US/ext/job/X/Y_R-1", jid))
         self.conn.commit()
@@ -168,11 +182,11 @@ class RestoreTests(unittest.TestCase):
                 mock.patch.object(sources, "_get", lambda u, **k: order.append("wd") or {"jobPostingInfo": {"jobDescription": "<li>Do</li>"}}):
             counts = reformat.restore_all(self.conn, delay=0)
         self.assertEqual(order, ["gh:acme", "ab:other", "wd"])           # acme holds the 90, other the 70, then the Workday job
-        self.assertEqual(counts, {"restored": 4, "gone": 0, "failed": 0})   # the Rippling job is not supported and is left alone
+        self.assertEqual(counts, {"restored": 4, "gone": 0, "failed": 0})   # the USAJobs job is not supported and is left alone
         rows = {r["id"]: (r["formatted"], r["description"]) for r in self.conn.execute("SELECT id, formatted, description FROM jobs")}
         self.assertEqual(rows["gh:acme:2"], (1, "## formatted 2"))
         self.assertEqual(rows["wd:big:R-1"], (1, "- Do"))
-        self.assertEqual(rows["rp:skip:1"], (0, "Plain text"))
+        self.assertEqual(rows["us:skip:1"], (0, "Plain text"))
 
     def test_a_closed_posting_is_marked_and_not_asked_for_again_while_a_failure_is_retried(self):
         self.add("gh:acme:5", 0)
@@ -187,6 +201,20 @@ class RestoreTests(unittest.TestCase):
             reformat.restore_all(self.conn, delay=0)
             f.assert_called_once_with("down")
         self.assertFalse(reformat.can_reformat("gh:acme:5", 2))
+
+    def test_a_404_means_taken_down_but_other_http_errors_are_retried_later(self):
+        class HttpError(Exception):
+            def __init__(self, code):
+                self.response = type("R", (), {"status_code": code})()
+        self.add("gh:gone:1", 0)
+        self.add("gh:blocked:1", 0)
+        with mock.patch.object(sources, "fetch_greenhouse", side_effect=lambda slug: (_ for _ in ()).throw(HttpError(404 if slug == "gone" else 403))), \
+                self.assertLogs("job-finder", level="WARNING"):
+            counts = reformat.restore_all(self.conn, delay=0)
+            one = reformat.reformat_job(self.conn, "gh:blocked:1")
+        self.assertEqual(counts, {"restored": 0, "gone": 1, "failed": 1})
+        self.assertFalse(one["updated"])
+        self.assertEqual({r["id"]: r["formatted"] for r in self.conn.execute("SELECT id, formatted FROM jobs")}, {"gh:gone:1": 2, "gh:blocked:1": 0})
 
     def test_the_run_can_be_stopped_and_reports_progress(self):
         import threading
@@ -205,7 +233,24 @@ class RestoreTests(unittest.TestCase):
         self.assertTrue(reformat.can_reformat("hm:job:co", 0))
         self.assertTrue(reformat.can_reformat("sr:a:1", 0))
         self.assertTrue(reformat.can_reformat("rc:a:1", 0))
-        self.assertFalse(reformat.can_reformat("rp:a:1", 0))      # the rest keep their plain text
+        for prefix in ("rp", "wk", "bb", "gm"):
+            self.assertTrue(reformat.can_reformat(f"{prefix}:a:1", 0), prefix)
+        self.assertFalse(reformat.can_reformat("us:a:1", 0))      # the rest keep their plain text
+
+    def test_a_rippling_posting_is_asked_for_by_its_own_address_and_keeps_its_bold_headings(self):
+        db.add_job(self.conn, sources.Job("rp:acme:uuid-1", "rippling", "acme", "Engineer", "Austin", "https://ats.rippling.com/acme/jobs/uuid-1",
+                                          description="Plain text"), 1.0)
+        self.conn.execute("UPDATE jobs SET formatted=0"); self.conn.commit()
+        asked = []
+        reply = {"description": {"company": "<div><p><b><strong style='font-size:18pt'>About Acme</strong></b></p><p>We build things.</p></div>",
+                                 "role": "<div><p>Duties</p><ul><li>Build</li><li>Ship</li></ul></div>"}}
+        with mock.patch.object(reformat.ats_sources, "_get", lambda u, **k: asked.append(u) or reply):
+            res = reformat.reformat_job(self.conn, "rp:acme:uuid-1")
+        self.assertEqual(asked, ["https://ats.rippling.com/api/v2/board/acme/jobs/uuid-1"])
+        self.assertEqual(res["description"], "**About Acme**\n\nWe build things.\n\nDuties\n\n- Build\n- Ship")
+
+    def test_nested_bold_is_one_bold(self):
+        self.assertEqual(sources.strip_html("<p><b><strong>Heading</strong></b></p><p>Body</p>"), "**Heading**\n\nBody")
 
 
 if __name__ == "__main__":

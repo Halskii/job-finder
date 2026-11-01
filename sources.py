@@ -49,6 +49,7 @@ class _Markdown(HTMLParser):
         self.skip = 0    # inside <script> or <style>
         self.depth = 0   # list nesting
         self.li = 0      # inside a list item
+        self.bold = 0    # nesting of <b> / <strong>
 
     def newlines(self, n: int) -> None:
         tail = "".join(self.out[-3:])
@@ -82,7 +83,9 @@ class _Markdown(HTMLParser):
             self.newlines(1)
             self.out.append("  " * max(self.depth - 1, 0) + "- ")
         elif tag in ("strong", "b"):
-            self.out.append("**")
+            self.bold += 1
+            if self.bold == 1:   # <b><strong>text</strong></b> is one bold, not two
+                self.out.append("**")
 
     def handle_endtag(self, tag) -> None:
         if tag in ("script", "style"):
@@ -101,8 +104,10 @@ class _Markdown(HTMLParser):
             self.newlines(2)
         elif tag in self.LINES:
             self.newlines(1)
-        elif tag in ("strong", "b"):
-            self.out.append("**")
+        elif tag in ("strong", "b") and self.bold:
+            self.bold -= 1
+            if not self.bold:
+                self.out.append("**")
 
     def handle_data(self, data) -> None:
         if self.skip:

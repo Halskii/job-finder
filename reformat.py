@@ -3,8 +3,9 @@
 Postings stored earlier hold plain text with the headings, bullets and bold already thrown away. This module asks each posting's
 own source for it again and stores the formatted version:
   Greenhouse, Lever, Ashby,  the company's whole board comes back in one request; every stored job of that board is found in it
-  Recruitee, Personio
-  SmartRecruiters            the posting's own detail request
+  Recruitee, Personio, Gem
+  SmartRecruiters, Rippling, the posting's own detail request
+  Workable, BambooHR
   Workday                    the same detail request the first fetch used, rebuilt from the posting's address
   Himalayas                  the search API, by the posting's title
 Other sources keep their plain text.
@@ -23,8 +24,7 @@ import sources
 from errors import log
 
 BOARDS = {"gh": (sources, "fetch_greenhouse"), "lv": (sources, "fetch_lever"), "ab": (sources, "fetch_ashby"),
-          "rc": (ats_sources, "fetch_recruitee"), "pn": (ats_sources, "fetch_personio")}   # job id prefix -> the fetcher for a whole board
-SUPPORTED = set(BOARDS) | {"wd", "hm", "sr"}
+          "rc": (ats_sources, "fetch_recruitee"), "pn": (ats_sources, "fetch_personio"), "gm": (ats_sources, "fetch_gem")}   # job id prefix -> the fetcher for a whole board
 WORKDAY_URL = re.compile(r"https://([^/]+)/[A-Za-z-]+/([^/]+)(/job/.+)$")   # host / locale / site / the posting's own path
 
 
@@ -64,13 +64,34 @@ def _from_himalayas(row) -> str | None:
     return None
 
 
-SINGLES = {"wd": _from_workday, "hm": _from_himalayas, "sr": _from_smartrecruiters}   # sources asked one posting at a time
+def _from_detail_request(source: str, filler):
+    """A source whose first fetch also asked for each posting on its own: ask the same way, from the id (prefix:slug:posting)."""
+    def restore(row) -> str | None:
+        _, slug, posting = row["id"].split(":", 2)
+        job = sources.Job(row["id"], source, row["company"], row["title"], "", row["url"] or "", detail={"slug": slug, "id": posting, "shortcode": posting})
+        filler(job)
+        return job.description
+    return restore
+
+
+SINGLES = {"wd": _from_workday, "hm": _from_himalayas, "sr": _from_smartrecruiters,   # sources asked one posting at a time
+           "rp": _from_detail_request("rippling", ats_sources.fill_rippling_detail),
+           "wk": _from_detail_request("workable", ats_sources.fill_workable_detail),
+           "bb": _from_detail_request("bamboohr", ats_sources.fill_bamboohr_detail)}
+SUPPORTED = set(BOARDS) | set(SINGLES)
 
 
 def _board_descriptions(prefix: str, slug: str) -> dict[str, str]:
     """{job id: formatted description} for everything on one company's board (one request)."""
     module, name = BOARDS[prefix]
     return {j.id: j.description for j in getattr(module, name)(slug) if j.description}
+
+
+def _is_gone(ex: Exception, prefix: str = "") -> bool:
+    """True when the source answered 'no such posting': it has been taken down, so asking again is pointless.
+    That is a 404 or 410, and for Workday also a 403, which is how it answers for a posting no longer on the board."""
+    status = getattr(getattr(ex, "response", None), "status_code", None)
+    return status in (404, 410) or (status == 403 and prefix == "wd")
 
 
 def _store(conn, job_id: str, description: str | None) -> None:
@@ -97,8 +118,10 @@ def reformat_job(conn, job_id: str) -> dict:
         else:
             description = SINGLES[prefix](row)
     except Exception as ex:
-        log.warning("Could not restore the formatting of %s: %s", job_id, ex)
-        return {"updated": False, "description": None}
+        if not _is_gone(ex, prefix):
+            log.warning("Could not restore the formatting of %s: %s", job_id, ex)
+            return {"updated": False, "description": None}
+        description = None   # taken down: remember that
     _store(conn, job_id, description)
     return {"updated": bool(description), "description": description or None}
 
@@ -124,8 +147,13 @@ def restore_all(conn, delay: float = 0.4, progress=None, stop=None) -> dict:
             else:
                 results = [(rows[0]["id"], SINGLES[key[1].split(":", 1)[0]](rows[0]))]
         except Exception as ex:
-            log.warning("Could not restore formatting for %s: %s", key[-1], ex)
-            counts["failed"] += len(rows)
+            if _is_gone(ex, key[1].split(":", 1)[0]):   # the posting or the whole board is no longer there
+                for r in rows:
+                    _store(conn, r["id"], None)
+                counts["gone"] += len(rows)
+            else:
+                log.warning("Could not restore formatting for %s: %s", key[-1], ex)
+                counts["failed"] += len(rows)
         else:
             for job_id, description in results:
                 _store(conn, job_id, description)
