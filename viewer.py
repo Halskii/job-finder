@@ -1,31 +1,23 @@
-"""Local web viewer for the job reports. Usage: python viewer.py [--port 8765] [--no-open]
-
-Reads reports/*.md, joins each entry to its stored posting in jobs.db (by the ID line), and serves a
-sidebar + detail page on 127.0.0.1 only. Standard library only."""
+"""What the web app shows one signed-in user: their reports joined to the stored postings, saved and discarded jobs,
+interview prep, the tracker, and the page itself (PAGE). web.py is the server; start it with `python web.py`."""
 from __future__ import annotations
 
-import argparse
 import json
-import logging
 import re
-import sys
-import threading
-import webbrowser
 from datetime import date
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import unquote, urlparse
+from urllib.parse import urlparse
 
 import db
 import reformat
 import sources
 import tailor
 import tips
-from errors import STATUS, explain
+import userdata
+from errors import explain
 
 ROOT = Path(__file__).parent
-REPORTS = ROOT / "reports"
-DB_PATH = ROOT / "jobs.db"
+DB_ARGS: dict = {}   # keyword arguments for db.connect: by default the DATABASE_URL database as the local user
 STATUSES = ("new", "saved", "applied", "skipped", "interview", "offer", "accepted", "rejected", "withdrawn")
 
 HEADER_RE = re.compile(r"^## (\d+) \| (.+)$")
@@ -79,15 +71,27 @@ def safe_url(url: str) -> str:
     return url if urlparse(url or "").scheme in ("http", "https") else ""
 
 
-def report_names() -> list[str]:
-    return sorted((p.name for p in REPORTS.glob("*.md")), reverse=True) if REPORTS.is_dir() else []
 
 
-def load_report(name: str) -> dict | None:
-    if name not in report_names():   # whitelist: also blocks path traversal
+def _db(uid: int):
+    """A connection that works as this user."""
+    return db.connect(**{**DB_ARGS, "user": uid})
+
+
+def reports_dir(uid: int) -> Path:
+    return userdata.home(uid) / "reports"
+
+
+def report_names(uid: int) -> list[str]:
+    folder = reports_dir(uid)
+    return sorted((p.name for p in folder.glob("*.md")), reverse=True) if folder.is_dir() else []
+
+
+def load_report(uid: int, name: str) -> dict | None:
+    if name not in report_names(uid):   # whitelist: also blocks path traversal
         return None
-    data = parse_report((REPORTS / name).read_text(encoding="utf-8"))
-    conn = db.connect(str(DB_PATH))   # also upgrades an older database (adds the applied_at column)
+    data = parse_report((reports_dir(uid) / name).read_text(encoding="utf-8"))
+    conn = _db(uid)   # also upgrades an older database (adds the applied_at column)
     try:
         for j in data["jobs"]:
             row = conn.execute("SELECT * FROM jobs WHERE id=?", (j.get("id"),)).fetchone() if j.get("id") else None
@@ -123,34 +127,34 @@ def job_dict(r) -> dict:
     }
 
 
-def reformat_for(job_id: str) -> dict:
-    conn = db.connect(str(DB_PATH))
+def reformat_for(uid: int, job_id: str) -> dict:
+    conn = _db(uid)
     try:
         return reformat.reformat_job(conn, job_id)
     finally:
         conn.close()
 
 
-def load_saved() -> dict:
-    """The saved jobs from jobs.db, shaped like a report so the page can show them like one."""
-    conn = db.connect(str(DB_PATH))
+def load_saved(uid: int) -> dict:
+    """The saved jobs from the database, shaped like a report so the page can show them like one."""
+    conn = _db(uid)
     try:
         return {"title": "Saved jobs", "jobs": [job_dict(r) for r in db.saved(conn)]}
     finally:
         conn.close()
 
 
-def load_trash() -> dict:
+def load_trash(uid: int) -> dict:
     """The jobs you discarded, shaped like a report."""
-    conn = db.connect(str(DB_PATH))
+    conn = _db(uid)
     try:
         return {"title": "Trash", "jobs": [job_dict(r) for r in db.trashed(conn)]}
     finally:
         conn.close()
 
 
-def load_job(job_id: str) -> dict | None:
-    conn = db.connect(str(DB_PATH))
+def load_job(uid: int, job_id: str) -> dict | None:
+    conn = _db(uid)
     try:
         r = conn.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
         return job_dict(r) if r else None
@@ -158,19 +162,19 @@ def load_job(job_id: str) -> dict | None:
         conn.close()
 
 
-def load_prep() -> dict:
+def load_prep(uid: int) -> dict:
     """The jobs that have saved interview prep, newest first, shaped like a report."""
-    conn = db.connect(str(DB_PATH))
+    conn = _db(uid)
     try:
         return {"title": "Interview prep", "jobs": [{**job_dict(r), "prep_created": r["prep_created"]} for r in db.jobs_with_tips(conn)]}
     finally:
         conn.close()
 
 
-def mark_status(job_id: str, status: str) -> dict:
+def mark_status(uid: int, job_id: str, status: str) -> dict:
     """Set a job's status. An applied-type status records today as the date applied (unless one is already stored);
     any other status removes the job from the tracker. Returns how many rows changed and the resulting date."""
-    conn = db.connect(str(DB_PATH))
+    conn = _db(uid)
     try:
         n = db.set_status_exact(conn, job_id, status)
         row = conn.execute("SELECT applied_at FROM jobs WHERE id=?", (job_id,)).fetchone()
@@ -190,8 +194,8 @@ def parse_day(value) -> date | None:
     return day if day <= date.today() else None
 
 
-def set_applied_date(job_id: str, day: date) -> int:
-    conn = db.connect(str(DB_PATH))
+def set_applied_date(uid: int, job_id: str, day: date) -> int:
+    conn = _db(uid)
     try:
         return db.set_applied_date(conn, job_id, day)
     finally:
@@ -224,10 +228,10 @@ def round_fields(body: dict) -> tuple:
     return kind, day, outcome, notes
 
 
-def round_action(body: dict) -> dict:
+def round_action(uid: int, body: dict) -> dict:
     """Add, update, or delete one interview round. LookupError for a job or round that is not there, ValueError for bad input."""
     action = body.get("action")
-    conn = db.connect(str(DB_PATH))
+    conn = _db(uid)
     try:
         if action == "add":
             job_id = str(body["id"])
@@ -256,9 +260,9 @@ def round_action(body: dict) -> dict:
         conn.close()
 
 
-def load_tracker() -> dict:
+def load_tracker(uid: int) -> dict:
     """Counts for this week / this month / all time, and every tracked application, newest first."""
-    conn = db.connect(str(DB_PATH))
+    conn = _db(uid)
     try:
         rounds = db.rounds_by_job(conn)
         return {
@@ -269,21 +273,17 @@ def load_tracker() -> dict:
         conn.close()
 
 
-_tailoring = threading.Lock()   # one tailoring at a time: each one is a paid API call
-_tipping = threading.Lock()     # likewise for interview tips
-
-
-def job_exists(job_id: str) -> bool:
-    conn = db.connect(str(DB_PATH))
+def job_exists(uid: int, job_id: str) -> bool:
+    conn = _db(uid)
     try:
         return conn.execute("SELECT 1 FROM jobs WHERE id=?", (job_id,)).fetchone() is not None
     finally:
         conn.close()
 
 
-def tips_events(job_id: str, refresh: bool = False):
+def tips_events(uid: int, job_id: str, refresh: bool = False):
     """The events of one interview prep run (see tips.stream_tips). A failure becomes an error event, so the page can show it."""
-    conn = db.connect(str(DB_PATH))
+    conn = _db(uid)
     try:
         yield from tips.stream_tips(conn, job_id, refresh)
     except Exception as ex:   # missing key, a failed API call, a bad answer: show the reason on the page
@@ -293,177 +293,12 @@ def tips_events(job_id: str, refresh: bool = False):
         conn.close()
 
 
-def tailor_for(job_id: str, resume_request: str = "", letter_request: str = "") -> dict:
-    conn = db.connect(str(DB_PATH))
+def tailor_for(uid: int, job_id: str, resume_request: str = "", letter_request: str = "") -> dict:
+    conn = _db(uid)
     try:
         return tailor.tailor_job(conn, job_id, resume_request=resume_request, letter_request=letter_request)
     finally:
         conn.close()
-
-
-class Handler(BaseHTTPRequestHandler):
-    server_version = "JobViewer"
-
-    def log_message(self, fmt, *args) -> None:   # keep the terminal quiet
-        pass
-
-    def _host_ok(self) -> bool:
-        # Blocks DNS-rebinding: only answer requests addressed to the loopback name we serve on.
-        host = (self.headers.get("Host") or "").rsplit(":", 1)[0].strip("[]")
-        return host in ("127.0.0.1", "localhost", "::1")
-
-    def _send(self, code: int, body: bytes, ctype: str) -> None:
-        self.send_response(code)
-        self.send_header("Content-Type", ctype)
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
-        self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("Content-Security-Policy", "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'")
-        self.end_headers()
-        self.wfile.write(body)
-
-    def _json(self, code: int, obj) -> None:
-        self._send(code, json.dumps(obj).encode("utf-8"), "application/json; charset=utf-8")
-
-    def _error(self, code: int, message: str, kind: str) -> None:
-        """An error response: {"error": a sentence for the person using the page, "code": a short name for programs}."""
-        self._json(code, {"error": message, "code": kind})
-
-    def _fail(self, ex: BaseException) -> None:
-        """Any exception the handlers did not expect, as a friendly message. The details go to the terminal, never to the page."""
-        message, kind = explain(ex)
-        try:
-            self._error(STATUS.get(kind, 422), message, kind)
-        except OSError:   # the page went away
-            pass
-
-    def _bad_request(self) -> None:
-        self._error(400, "That request was not understood. Reload the page and try again.", "bad_request")
-
-    def _tailor(self, job_id: str, resume_request: str, letter_request: str) -> None:
-        """Make the tailored resume and cover letter for one job. Takes a minute or two, since it waits on the model."""
-        if not _tailoring.acquire(blocking=False):
-            return self._error(409, "Already working on another job. Wait for it to finish.", "busy")
-        try:
-            self._json(200, tailor_for(job_id, resume_request, letter_request))
-        except LookupError:
-            self._error(404, "We could not find that job. Reload the page and try again.", "not_found")
-        except Exception as ex:   # missing key or resume, no browser for the PDF, a failed API call: say what to do, in plain words
-            self._fail(ex)
-        finally:
-            _tailoring.release()
-
-    def _tips(self, job_id: str, refresh: bool) -> None:
-        """Interview prep for a job, streamed to the page as it is written, one JSON event per line. A saved answer comes at once."""
-        if not job_exists(job_id):
-            return self._error(404, "We could not find that job. Reload the page and try again.", "not_found")
-        if not _tipping.acquire(blocking=False):
-            return self._error(409, "Interview prep is already being written for another job. Wait for it to finish.", "busy")
-        try:
-            self.send_response(200)
-            for k, v in (("Content-Type", "application/x-ndjson; charset=utf-8"), ("Cache-Control", "no-store"),
-                         ("X-Content-Type-Options", "nosniff"), ("Content-Security-Policy", "default-src 'none'")):
-                self.send_header(k, v)
-            self.end_headers()   # no Content-Length: the response ends when the connection closes
-            alive = True
-            for event in tips_events(job_id, refresh):
-                if alive:
-                    try:
-                        self.wfile.write((json.dumps(event) + "\n").encode("utf-8"))
-                        self.wfile.flush()
-                    except OSError:   # the page went away; keep going so the answer is still written and saved
-                        alive = False
-        finally:
-            _tipping.release()
-
-    def _round(self, body: dict) -> None:
-        try:
-            self._json(200, round_action(body))
-        except (ValueError, KeyError, TypeError) as ex:   # KeyError is a LookupError, so it must be caught before the 404 below
-            if isinstance(ex, ValueError):
-                self._error(400, str(ex), "invalid")
-            else:
-                self._bad_request()
-        except LookupError as ex:
-            self._error(404, str(ex), "not_found")
-        except Exception as ex:
-            self._fail(ex)
-
-    def do_GET(self) -> None:
-        try:
-            self._get()
-        except Exception as ex:   # never let a stack trace or a bare dropped connection reach the page
-            self._fail(ex)
-
-    def do_POST(self) -> None:
-        try:
-            self._post()
-        except Exception as ex:
-            self._fail(ex)
-
-    def _get(self) -> None:
-        """Serve the page and the read-only JSON endpoints it loads its data from."""
-        if not self._host_ok():
-            return self._error(403, "This page can only be opened from this computer.", "bad_host")
-        path = unquote(urlparse(self.path).path)
-        if path == "/":
-            return self._send(200, PAGE.encode("utf-8"), "text/html; charset=utf-8")
-        if path == "/api/reports":
-            return self._json(200, report_names())
-        if path == "/api/tracker":
-            return self._json(200, load_tracker())
-        if path == "/api/saved":
-            return self._json(200, load_saved())
-        if path == "/api/prep":
-            return self._json(200, load_prep())
-        if path == "/api/trash":
-            return self._json(200, load_trash())
-        if path.startswith("/api/job/"):
-            job = load_job(path[len("/api/job/"):])
-            return self._json(200, job) if job else self._error(404, "We could not find that job. Reload the page and try again.", "not_found")
-        if path.startswith("/api/report/"):
-            data = load_report(path[len("/api/report/"):])
-            return self._json(200, data) if data else self._error(404, "That report does not exist.", "not_found")
-        self._error(404, "That page does not exist.", "not_found")
-
-    def _post(self) -> None:
-        """The writes the page can make: change a job's status or application date, track interview rounds, get interview tips,
-        or write a tailored resume and cover letter."""
-        if not self._host_ok():
-            return self._error(403, "This page can only be opened from this computer.", "bad_host")
-        # Requiring JSON means a web page on another origin can't send this without a CORS preflight, which we never grant.
-        path = urlparse(self.path).path
-        if path not in ("/api/mark", "/api/applied-date", "/api/tailor", "/api/round", "/api/tips", "/api/reformat") or "application/json" not in (self.headers.get("Content-Type") or ""):
-            return self._bad_request()
-        try:
-            body = json.loads(self.rfile.read(max(0, min(int(self.headers.get("Content-Length") or 0), 40_000))))   # room for two 2,000-character requests, even all non-ASCII
-            if not isinstance(body, dict):
-                raise ValueError
-            if path == "/api/round":
-                return self._round(body)
-            job_id = str(body["id"])
-            if path == "/api/mark":
-                status = str(body["status"])
-            elif path == "/api/applied-date":
-                day = parse_day(body["date"])
-        except (ValueError, KeyError, TypeError):
-            return self._bad_request()
-        if path == "/api/tips":
-            return self._tips(job_id, bool(body.get("refresh")))
-        if path == "/api/reformat":
-            try:
-                return self._json(200, reformat_for(job_id))
-            except LookupError:
-                return self._error(404, "We could not find that job. Reload the page and try again.", "not_found")
-        if path == "/api/tailor":
-            return self._tailor(job_id, tailor.clean_request(body.get("resume_request")), tailor.clean_request(body.get("letter_request")))
-        if path == "/api/applied-date":
-            if day is None:
-                return self._error(400, "Pick a real date that is not in the future.", "invalid")
-            return self._json(200, {"updated": set_applied_date(job_id, day)})
-        if status not in STATUSES:
-            return self._error(400, "That is not a status this program knows.", "invalid")
-        self._json(200, mark_status(job_id, status))
 
 
 PAGE = r"""<!doctype html>
@@ -473,7 +308,10 @@ PAGE = r"""<!doctype html>
 <style>
 :root{color-scheme:dark;--bg:#202124;--panel:#292a2d;--ink:#e8eaed;--mute:#9aa0a6;--line:#3c4043;--accent:#8ab4f8;--good:#81c995;--warn:#fdd663;--bad:#f28b82;--on-accent:#202124}   /* Chrome's dark theme */
 :root[data-theme="light"]{color-scheme:light;--bg:#f8f9fa;--panel:#fff;--ink:#202124;--mute:#5f6368;--line:#dadce0;--accent:#1a73e8;--good:#188038;--warn:#b06000;--bad:#d93025;--on-accent:#fff}
-#theme-toggle{position:absolute;top:10px;right:22px;z-index:3;display:flex;border:1px solid var(--line);border-radius:99px;background:var(--panel);padding:2px}
+#topbar{position:absolute;top:10px;right:22px;z-index:3;display:flex;align-items:center;gap:12px}
+#account{display:flex;align-items:center;gap:10px;font-size:13px;color:var(--mute)}#account[hidden]{display:none}
+#account .who{max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#theme-toggle{display:flex;border:1px solid var(--line);border-radius:99px;background:var(--panel);padding:2px}
 #theme-toggle button{display:flex;align-items:center;gap:5px;border:0;background:none;color:var(--mute);font:inherit;font-size:13px;padding:4px 11px;border-radius:99px;cursor:pointer}
 #theme-toggle button:hover{color:var(--ink)}#theme-toggle button[aria-pressed="true"]{background:var(--accent);color:var(--on-accent);font-weight:600}
 #theme-toggle svg{display:block}
@@ -566,7 +404,7 @@ td.actions-cell .btn{display:block;width:100%;padding:4px 8px;margin:0 0 4px}td.
 @media print{
   :root{color-scheme:light;--bg:#fff;--panel:#fff;--ink:#000;--mute:#555;--line:#ccc;--accent:#1a56db;--good:#137333;--warn:#8a5a00;--bad:#b3261e}
   body{display:block;height:auto}#stage{display:block}main{overflow:visible;padding:0}
-  nav,#trash-btn,#theme-toggle,.save-btn,#prep-panel,#toasts,.row{display:none!important}
+  nav,#trash-btn,#topbar,.save-btn,#prep-panel,#toasts,.row{display:none!important}
   #desc{border:0;padding:0}.chip{border-color:#999}
 }
 @media (max-width:760px){body{flex-direction:column;height:auto}nav{width:auto;max-height:45vh}main{padding:52px 16px 16px}}
@@ -588,9 +426,9 @@ td.actions-cell .btn{display:block;width:100%;padding:4px 8px;margin:0 0 4px}td.
 <div class="actions"><button class="btn" value="cancel">Cancel</button><button class="btn primary" value="ok">Tailor</button></div>
 </form></dialog>
 <datalist id="round-kinds"><option value="Recruiter screen"><option value="Phone screen"><option value="Technical screen"><option value="Coding interview"><option value="System design"><option value="Take-home"><option value="Hiring manager"><option value="Behavioral"><option value="Onsite / final loop"></datalist>
-<div id="stage"><div id="theme-toggle" role="group" aria-label="Color theme">
+<div id="stage"><div id="topbar"><div id="account" hidden></div><div id="theme-toggle" role="group" aria-label="Color theme">
 <button type="button" data-theme="dark" aria-pressed="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>Dark</button>
-<button type="button" data-theme="light" aria-pressed="false"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>Light</button></div>
+<button type="button" data-theme="light" aria-pressed="false"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>Light</button></div></div>
 <button class="btn" id="trash-btn" aria-label="Trash" title="Trash: jobs you discarded"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg><span id="trash-count"></span></button>
 <main id="main"><div class="empty">Select a job from the list.</div></main></div>
 <aside id="prep-panel" aria-label="Interview prep">
@@ -622,6 +460,7 @@ function friendly(e){   // the sentence to show a person for any error; never a 
 async function api(path,opts){
   let r;try{r=await fetch(path,opts)}catch(e){throw new ApiError(NETWORK,0,"network")}
   const d=await r.json().catch(()=>null);
+  if(r.status===401&&d&&d.code==="not_signed_in"){location.href="/login";throw new ApiError("Your session ended. Sign in again.",401,d.code)}
   if(!r.ok)throw new ApiError((d&&d.error)||BY_STATUS[r.status]||SERVER_TROUBLE,r.status,d&&d.code);
   return d;
 }
@@ -821,7 +660,9 @@ function paintTailor(id){
     btn.style.minWidth=st.width+"px";   // keep the button the same size while it shows the spinner
     btn.replaceChildren(el("span",{className:"spinner"}));btn.setAttribute("aria-label","Working, this takes a minute or two");
   }else{btn.textContent=TAILOR_LABEL;btn.style.minWidth="";btn.removeAttribute("aria-label")}
-  note.textContent=st.message||"";
+  note.replaceChildren(document.createTextNode(st.message||""),
+    ...(st.files||[]).flatMap(f=>[" ",el("a",{href:"/api/files/"+encodeURIComponent(f),textContent:f,download:f})]),
+    ...(st.warning?[document.createTextNode(" "+st.warning)]:[]));
 }
 function askTailor(j){
   const dlg=$("#tailor-dlg");
@@ -832,13 +673,14 @@ function askTailor(j){
 async function tailorJob(j,resume_request,letter_request){
   const btn=$("#tailor-btn");
   tailorState[j.id]={running:true,width:btn?btn.offsetWidth:206,message:""};paintTailor(j.id);
-  let message;
+  let message,files=[],warning="";
   try{
     const d=await post("/api/tailor",{id:j.id,resume_request,letter_request});
     const long=Object.entries(d.pages).filter(([k,n])=>n>1).map(([k])=>k.replace("_"," "));
-    message="Saved to Optimized Resumes: "+d.files.join(", ")+" (each also saved as an editable Word file)"+(long.length?" (the "+long.join(" and ")+" runs past one page; trim it before sending)":"");
+    message="Ready to download (PDF and editable Word):";files=d.files.concat(d.word_files||[]);
+    if(long.length)warning="The "+long.join(" and ")+" runs past one page; trim it before sending.";
   }catch(e){fail("Couldn't write your resume and cover letter",e);message="That didn't finish. "+friendly(e)}
-  tailorState[j.id]={running:false,message};paintTailor(j.id);
+  tailorState[j.id]={running:false,message,files,warning};paintTailor(j.id);
 }
 async function reloadJobs(){if(reportName)await openReport(reportName)}
 async function refreshTracker(){
@@ -1044,6 +886,12 @@ function setTheme(t,save){   // Dark (the default) or Light; the choice is remem
 }
 document.querySelectorAll("#theme-toggle button").forEach(b=>b.addEventListener("click",()=>setTheme(b.dataset.theme,true)));
 setTheme(document.documentElement.dataset.theme==="light"?"light":"dark",false);
+api("/api/me").then(me=>{
+  const box=$("#account");
+  box.replaceChildren(el("span",{className:"who",textContent:me.name||me.email,title:me.email}),
+    el("button",{className:"btn",textContent:"Sign out",onclick:async()=>{try{await post("/auth/logout",{})}catch(e){}location.href="/login"}}));
+  box.hidden=false;
+}).catch(()=>{});
 refreshTracker();
 loadReports().catch(e=>{console.error(e);$("#main").replaceChildren(el("div",{className:"empty"},"We couldn't load your jobs. "+friendly(e),
   el("div",{className:"row",style:"justify-content:center"},el("button",{className:"btn",textContent:"Try again",onclick:()=>location.reload()}))))});
@@ -1051,42 +899,6 @@ loadReports().catch(e=>{console.error(e);$("#main").replaceChildren(el("div",{cl
 """
 
 
-def restore_in_background(delay: float) -> None:
-    """Give every posting stored as plain text its formatting back, a little at a time while the viewer runs, best matches first,
-    so that opening one finds it already done. Failures are logged and retried the next time the viewer starts."""
-    conn = db.connect(str(DB_PATH))
-    try:
-        counts = reformat.restore_all(conn, delay=delay)
-        if counts["restored"] or counts["failed"]:
-            logging.getLogger("job-finder").info("Restored formatting for %(restored)d postings (%(gone)d no longer online, %(failed)d to retry)", counts)
-    except Exception:
-        logging.getLogger("job-finder").exception("Restoring posting formatting stopped early")
-    finally:
-        conn.close()
-
-
-def main() -> None:
-    """Start the viewer on this computer only (127.0.0.1), so nothing else on the network can reach it."""
-    logging.basicConfig(level=logging.WARNING, format="%(asctime)s %(levelname)s %(message)s")   # unexpected errors, with details, go to this window
-    ap = argparse.ArgumentParser(description="Browse job reports in your browser.")
-    ap.add_argument("--port", type=int, default=8765)
-    ap.add_argument("--no-open", action="store_true", help="don't open a browser tab")
-    ap.add_argument("--no-restore", action="store_true", help="don't restore the formatting of older postings in the background")
-    args = ap.parse_args()
-    if not DB_PATH.exists():
-        sys.exit("jobs.db not found. Run: python main.py run")
-    if not args.no_restore:
-        threading.Thread(target=restore_in_background, args=(0.4,), daemon=True).start()
-    srv = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
-    url = f"http://127.0.0.1:{args.port}/"
-    print(f"Serving {url}  (Ctrl+C to stop)")
-    if not args.no_open:
-        webbrowser.open(url)
-    try:
-        srv.serve_forever()
-    except KeyboardInterrupt:
-        print("\nStopped.")
-
-
 if __name__ == "__main__":
-    main()
+    import web
+    web.main()

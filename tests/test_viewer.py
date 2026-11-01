@@ -1,15 +1,16 @@
-"""Offline tests for viewer.py: report parsing, the round trip with main.write_report, and the local server."""
+"""Offline tests for viewer.py and web.py: report parsing, the round trip with main.write_report, and the signed-in server."""
 import json
 import tempfile
-import threading
+import urllib.parse
 import unittest
 import urllib.error
 import urllib.request
-from http.server import ThreadingHTTPServer
 from pathlib import Path
 
 import db
+from tests import pgtest, webtest
 import main
+import web
 import sources
 import viewer
 from errors import UserError
@@ -69,29 +70,24 @@ class ServerTests(unittest.TestCase):
     def setUpClass(cls):
         cls.tmp = tempfile.TemporaryDirectory()
         root = Path(cls.tmp.name)
-        cls.db_path = root / "jobs.db"
-        (root / "reports").mkdir()
-        (root / "reports" / "2026-10-30.md").write_text(SAMPLE, encoding="utf-8")
-        (root / "secret.md").write_text("# secret", encoding="utf-8")
-        conn = db.connect(str(cls.db_path))
+        cls.site = webtest.Site(root)
+        cls.uid, cls.base = cls.site.uid, cls.site.base
+        cls.reports = cls.site.home / "reports"
+        cls.reports.mkdir()
+        (cls.reports / "2026-10-30.md").write_text(SAMPLE, encoding="utf-8")
+        (cls.site.home / "secret.md").write_text("# secret", encoding="utf-8")
+        conn = cls.site.db()
         db.add_job(conn, sources.Job("greenhouse:stripe:1", "greenhouse", "Stripe", "Platform Engineer",
                                      "Remote", "https://example.com/jobs/1", description="Build <b>things</b>."), 1.0)
         conn.close()
-        cls._saved = (viewer.ROOT, viewer.REPORTS, viewer.DB_PATH)
-        viewer.REPORTS, viewer.DB_PATH = root / "reports", cls.db_path
-        cls.srv = ThreadingHTTPServer(("127.0.0.1", 0), viewer.Handler)
-        cls.base = f"http://127.0.0.1:{cls.srv.server_address[1]}"
-        threading.Thread(target=cls.srv.serve_forever, daemon=True).start()
 
     @classmethod
     def tearDownClass(cls):
-        cls.srv.shutdown()
-        cls.srv.server_close()
-        viewer.ROOT, viewer.REPORTS, viewer.DB_PATH = cls._saved
+        cls.site.stop()
         cls.tmp.cleanup()
 
     def get(self, path, headers=None):
-        req = urllib.request.Request(self.base + path, headers=headers or {})
+        req = urllib.request.Request(self.base + path, headers=self.site.get_headers(headers))
         try:
             with urllib.request.urlopen(req) as r:
                 return r.status, r.read().decode("utf-8")
@@ -100,7 +96,7 @@ class ServerTests(unittest.TestCase):
 
     def post(self, path, body, ctype="application/json"):
         req = urllib.request.Request(self.base + path, data=json.dumps(body).encode(), method="POST",
-                                     headers={"Content-Type": ctype})
+                                     headers=self.site.get_headers({"Content-Type": ctype}))
         try:
             with urllib.request.urlopen(req) as r:
                 return r.status, json.loads(r.read())
@@ -187,7 +183,7 @@ class ServerTests(unittest.TestCase):
 
     def stream_tips(self, body):
         req = urllib.request.Request(self.base + "/api/tips", data=json.dumps(body).encode(), method="POST",
-                                     headers={"Content-Type": "application/json"})
+                                     headers=self.site.get_headers({"Content-Type": "application/json"}))
         try:
             with urllib.request.urlopen(req) as r:
                 return r.status, r.headers["Content-Type"], [json.loads(line) for line in r.read().decode("utf-8").splitlines() if line]
@@ -203,27 +199,27 @@ class ServerTests(unittest.TestCase):
             status, ctype, got = self.stream_tips({"id": "greenhouse:stripe:1"})
             self.assertEqual((status, got), (200, events))
             self.assertIn("ndjson", ctype)
-            f.assert_called_once_with("greenhouse:stripe:1", False)
+            f.assert_called_once_with(self.uid, "greenhouse:stripe:1", False)
         with mock.patch.object(viewer, "tips_events", return_value=iter([])) as f:
             self.stream_tips({"id": "greenhouse:stripe:1", "refresh": True})
-            f.assert_called_once_with("greenhouse:stripe:1", True)
-        with viewer._tipping:   # another job's prep is being written
+            f.assert_called_once_with(self.uid, "greenhouse:stripe:1", True)
+        with web.user_lock("tips", self.uid):   # another job's prep is being written
             self.assertEqual(self.stream_tips({"id": "greenhouse:stripe:1"})[0], 409)
 
     def test_a_failure_while_writing_becomes_an_error_event(self):
         from unittest import mock
         with mock.patch.object(viewer.tips, "stream_tips", side_effect=UserError("No Anthropic API key found. Add it to .env.", "no_api_key")):
-            got = list(viewer.tips_events("greenhouse:stripe:1"))
+            got = list(viewer.tips_events(self.uid, "greenhouse:stripe:1"))
         self.assertEqual(got, [{"type": "error", "error": "No Anthropic API key found. Add it to .env.", "code": "no_api_key"}])
         with mock.patch.object(viewer.tips, "stream_tips", side_effect=RuntimeError("boom at C:\\secret\\file.py line 3")), \
                 self.assertLogs("job-finder", level="ERROR"):
-            got = list(viewer.tips_events("greenhouse:stripe:1"))
+            got = list(viewer.tips_events(self.uid, "greenhouse:stripe:1"))
         self.assertEqual((got[0]["type"], got[0]["code"]), ("error", "internal"))
         self.assertNotIn("secret", got[0]["error"])          # details of an unexpected error stay in the terminal
         self.assertNotIn("RuntimeError", got[0]["error"])
 
     def test_interview_prep_list_holds_jobs_with_saved_prep(self):
-        conn = db.connect(str(viewer.DB_PATH))
+        conn = self.site.db()
         try:
             self.assertEqual(json.loads(self.get("/api/prep")[1])["jobs"], [])
             db.save_tips(conn, "greenhouse:stripe:1", {"markdown": "## Summary"}, "m", "2026-10-31")
@@ -253,11 +249,11 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(self.get("/api/job/nope")[0], 404)
 
     def test_an_hourly_rate_shows_instead_of_question_marks(self):
-        conn = db.connect(str(viewer.DB_PATH))
+        conn = self.site.db()
         db.add_job(conn, sources.Job("gh:hourly:1", "greenhouse", "Hourly Co", "DevOps Engineer", "Redmond, WA", "https://example.com/h",
                                      description="Range $40/hr-45/hr", pay_min=40, pay_max=45, pay_unit="hour"), 1.0)
         conn.close()
-        report = viewer.REPORTS / "2026-10-31.md"
+        report = self.reports / "2026-10-31.md"
         report.write_text("# Job matches, 2026-10-31\n\n## 92 | DevOps Engineer at Hourly Co\n- Location: Redmond, WA | Pay: ? - ? | Posted: 2026-10-22\n"
                           "- Verdict: **apply** | Fits.\n- Link: https://example.com/h\n- ID: `gh:hourly:1`\n", encoding="utf-8")
         try:
@@ -274,13 +270,13 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(self.post("/api/tailor", {})[0], 400)
         with mock.patch.object(viewer, "tailor_for", return_value={"files": ["a.pdf"]}) as f:
             self.assertEqual(self.post("/api/tailor", {"id": "greenhouse:stripe:1"}), (200, {"files": ["a.pdf"]}))
-            f.assert_called_once_with("greenhouse:stripe:1", "", "")
+            f.assert_called_once_with(self.uid, "greenhouse:stripe:1", "", "")
         with mock.patch.object(viewer, "tailor_for", return_value={"files": []}) as f:   # the optional requests are passed along, capped
             self.post("/api/tailor", {"id": "x", "resume_request": "lead with k8s", "letter_request": "y" * 5000})
-            f.assert_called_once_with("x", "lead with k8s", "y" * 2000)
+            f.assert_called_once_with(self.uid, "x", "lead with k8s", "y" * 2000)
         with mock.patch.object(viewer, "tailor_for", return_value={"files": []}) as f:   # hidden and control characters never reach the model
             self.post("/api/tailor", {"id": "x", "resume_request": "a\x00b\u202ec", "letter_request": "ok"})
-            f.assert_called_once_with("x", "abc", "ok")
+            f.assert_called_once_with(self.uid, "x", "abc", "ok")
         with mock.patch.object(viewer, "tailor_for", side_effect=LookupError("no such job")):
             self.assertEqual(self.post("/api/tailor", {"id": "nope"})[0], 404)
         with mock.patch.object(viewer, "tailor_for", side_effect=UserError("No Anthropic API key found. Add it to .env.", "no_api_key")):
@@ -292,7 +288,7 @@ class ServerTests(unittest.TestCase):
             self.assertEqual((status, body["code"]), (500, "internal"))
             self.assertNotIn("secret", body["error"])
             self.assertNotIn("ValueError", body["error"])
-        with viewer._tailoring:   # a tailoring already running
+        with web.user_lock("tailor", self.uid):   # a tailoring already running
             self.assertEqual(self.post("/api/tailor", {"id": "x"})[0], 409)
 
 
@@ -315,9 +311,10 @@ class ServerTests(unittest.TestCase):
 
     def test_a_negative_content_length_does_not_hang_the_server(self):
         import http.client
-        conn = http.client.HTTPConnection("127.0.0.1", self.srv.server_address[1], timeout=5)
+        conn = http.client.HTTPConnection("127.0.0.1", urllib.parse.urlparse(self.base).port, timeout=5)
         conn.putrequest("POST", "/api/tailor")
         conn.putheader("Content-Type", "application/json")
+        conn.putheader("Cookie", self.site.get_headers()["Cookie"])
         conn.putheader("Content-Length", "-1")
         conn.endheaders()
         self.assertEqual(conn.getresponse().status, 400)
@@ -330,7 +327,7 @@ class RoundTripTests(unittest.TestCase):
             saved_root = main.ROOT
             main.ROOT = Path(tmp)
             try:
-                conn = db.connect(str(Path(tmp) / "jobs.db"))
+                conn = pgtest.connect()
                 job = sources.Job("ashby:co:9", "ashby", "Co", "AI Engineer", "Austin, TX | Remote", "https://example.com/9",
                                   posted="2026-10-25", pay_min=100000, pay_max=140000, description="desc")
                 db.add_job(conn, job, 2.0)
