@@ -1,11 +1,12 @@
 """Offline tests for the application tracker: dates, week/month/all-time counts, and status handling."""
-import sqlite3
+
 import tempfile
 import unittest
 from datetime import date
 from pathlib import Path
 
 import db
+from tests import pgtest
 import sources
 
 
@@ -17,7 +18,7 @@ class TrackerBase(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.path = str(Path(self.tmp.name) / "jobs.db")
-        self.conn = db.connect(self.path)
+        self.conn = pgtest.connect()
 
     def tearDown(self):
         self.conn.close()
@@ -173,26 +174,6 @@ class OutcomeStatusTests(TrackerBase):
         import viewer
         self.assertEqual(set(viewer.STATUSES), main.STATUSES)
         self.assertTrue(set(db.APPLIED_STATUSES) <= main.STATUSES)
-
-
-class MigrationTests(unittest.TestCase):
-    def test_older_database_gets_the_column_and_keeps_its_data(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "old.db"
-            old = sqlite3.connect(path)
-            old.execute("CREATE TABLE jobs (id TEXT PRIMARY KEY, source TEXT, company TEXT, title TEXT, location TEXT, url TEXT,"
-                        " posted TEXT, pay_min INTEGER, pay_max INTEGER, description TEXT, quick_score REAL, score INTEGER,"
-                        " verdict TEXT, analysis TEXT, status TEXT DEFAULT 'new', first_seen REAL, notes TEXT)")
-            old.execute("INSERT INTO jobs (id, source, company, title, status) VALUES ('x', 'greenhouse', 'Acme', 'Engineer', 'applied')")
-            old.commit()
-            old.close()
-            conn = db.connect(str(path))
-            try:
-                r = conn.execute("SELECT status, applied_at FROM jobs").fetchone()
-                self.assertEqual((r["status"], r["applied_at"]), ("applied", None))   # no date was ever recorded: not invented
-                self.assertEqual(db.application_stats(conn)["all"]["applications"], 0)
-            finally:
-                conn.close()
 
 
 if __name__ == "__main__":

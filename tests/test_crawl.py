@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 import crawl
+from tests import pgtest
 import sources
 
 CFG = {"titles": ["Software Engineer"], "exclude_title_words": ["senior"], "us_only": True, "request_delay": 0, "min_pay": 0,
@@ -173,7 +174,7 @@ class CrawlCommandTests(unittest.TestCase):
         out = io.StringIO()
         args = argparse.Namespace(systems=None, crawls=3, keep_all=False, recheck=False, add=True)
         with tempfile.TemporaryDirectory() as d, mock.patch.object(main, "ROOT", Path(d)), mock.patch.object(crawl, "crawl_ids", down),                 mock.patch.object(crawl.time, "sleep"), redirect_stdout(out):
-            main.cmd_crawl(args, {"sources": {}}, {}, None)
+            main.cmd_crawl(args, {"sources": {}}, {}, pgtest.connect())
         self.assertIn("not answering right now", out.getvalue())
         self.assertNotIn("0 new board", out.getvalue())
 

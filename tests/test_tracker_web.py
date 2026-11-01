@@ -1,17 +1,15 @@
-"""Offline tests for the tracker endpoints and page of viewer.py. Each test gets its own database and server."""
+"""Offline tests for the tracker endpoints and page of the web app. Each test gets its own database and server."""
 import json
 import tempfile
-import threading
 import unittest
 import urllib.error
 import urllib.request
 from datetime import date, timedelta
-from http.server import ThreadingHTTPServer
 from pathlib import Path
 
 import db
+from tests import webtest
 import sources
-import viewer
 
 REPORT = """# Job matches, 2026-10-30
 
@@ -41,34 +39,29 @@ class TrackerWebTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         root = Path(self.tmp.name)
-        (root / "reports").mkdir()
-        (root / "reports" / "2026-10-30.md").write_text(REPORT, encoding="utf-8")
-        conn = db.connect(str(root / "jobs.db"))
+        self.site = webtest.Site(root)
+        self.base = self.site.base
+        (self.site.home / "reports").mkdir()
+        (self.site.home / "reports" / "2026-10-30.md").write_text(REPORT, encoding="utf-8")
+        conn = self.site.db()
         for id_, company, title in (("greenhouse:stripe:1", "Stripe", "Platform Engineer"), ("greenhouse:acme:2", "Acme", "Software Engineer")):
             db.add_job(conn, sources.Job(id_, "greenhouse", company, title, "Remote", "https://example.com/jobs/" + id_[-1], description="d"), 1.0)
         conn.close()
-        self.saved = (viewer.REPORTS, viewer.DB_PATH)
-        viewer.REPORTS, viewer.DB_PATH = root / "reports", root / "jobs.db"
-        self.srv = ThreadingHTTPServer(("127.0.0.1", 0), viewer.Handler)
-        self.base = f"http://127.0.0.1:{self.srv.server_address[1]}"
-        threading.Thread(target=self.srv.serve_forever, daemon=True).start()
 
     def tearDown(self):
-        self.srv.shutdown()
-        self.srv.server_close()
-        viewer.REPORTS, viewer.DB_PATH = self.saved
+        self.site.stop()
         self.tmp.cleanup()
 
     def get(self, path):
         try:
-            with urllib.request.urlopen(self.base + path) as r:
+            with urllib.request.urlopen(urllib.request.Request(self.base + path, headers=self.site.get_headers())) as r:
                 return r.status, json.loads(r.read())
         except urllib.error.HTTPError as e:
             return e.code, json.loads(e.read())
 
     def post(self, path, body):
         req = urllib.request.Request(self.base + path, data=json.dumps(body).encode(), method="POST",
-                                     headers={"Content-Type": "application/json"})
+                                     headers=self.site.get_headers({"Content-Type": "application/json"}))
         try:
             with urllib.request.urlopen(req) as r:
                 return r.status, json.loads(r.read())
@@ -137,7 +130,7 @@ class TrackerWebTests(unittest.TestCase):
         self.assertEqual(self.post("/api/mark", {"id": "greenhouse:stripe:1", "status": "ghosted"})[0], 400)
 
     def test_page_offers_every_outcome_in_the_dropdown(self):
-        with urllib.request.urlopen(self.base + "/") as r:
+        with urllib.request.urlopen(urllib.request.Request(self.base + "/", headers=self.site.get_headers())) as r:
             page = r.read().decode("utf-8")
         for label in ("Applied", "Interview", "Offer received", "Offer accepted", "Rejected", "Withdrawn"):
             self.assertIn(label, page)
@@ -145,7 +138,9 @@ class TrackerWebTests(unittest.TestCase):
     # ---------------------------------------------------------------- changing the date
     def test_change_the_date_moves_it_between_week_month_and_all_time(self):
         self.post("/api/mark", {"id": "greenhouse:stripe:1", "status": "applied"})
-        old = date.today().replace(day=1) - timedelta(days=1)   # last day of the previous month
+        today = date.today()
+        # a day before both this month and this week: the last of last month can still be in this week (on the 1st of a month)
+        old = min(today.replace(day=1), today - timedelta(days=today.weekday())) - timedelta(days=1)
         self.assertEqual(self.post("/api/applied-date", {"id": "greenhouse:stripe:1", "date": old.isoformat()}), (200, {"updated": 1}))
         s = self.get("/api/tracker")[1]["stats"]
         self.assertEqual((s["week"]["applications"], s["month"]["applications"], s["all"]["applications"]), (0, 0, 1))
@@ -165,26 +160,26 @@ class TrackerWebTests(unittest.TestCase):
 
     def test_missing_fields_and_wrong_content_type(self):
         self.assertEqual(self.post("/api/applied-date", {"id": "greenhouse:stripe:1"})[0], 400)
-        req = urllib.request.Request(self.base + "/api/applied-date", data=b"{}", method="POST", headers={"Content-Type": "text/plain"})
+        req = urllib.request.Request(self.base + "/api/applied-date", data=b"{}", method="POST", headers=self.site.get_headers({"Content-Type": "text/plain"}))
         with self.assertRaises(urllib.error.HTTPError) as ctx:
             urllib.request.urlopen(req)
         self.assertEqual(ctx.exception.code, 400)
 
     # ---------------------------------------------------------------- the page
     def test_page_has_the_tracker_tab_and_apply_button(self):
-        with urllib.request.urlopen(self.base + "/") as r:
+        with urllib.request.urlopen(urllib.request.Request(self.base + "/", headers=self.site.get_headers())) as r:
             page = r.read().decode("utf-8")
         for needle in ("Mark as applied", 'id="tab-tracker"', "This week", "This month", "All time", "/api/tracker", "/api/applied-date"):
             self.assertIn(needle, page)
 
     def test_bad_host_is_rejected_for_the_new_endpoint(self):
-        req = urllib.request.Request(self.base + "/api/tracker", headers={"Host": "evil.example.com"})
+        req = urllib.request.Request(self.base + "/api/tracker", headers=self.site.get_headers({"Host": "evil.example.com"}))
         with self.assertRaises(urllib.error.HTTPError) as ctx:
             urllib.request.urlopen(req)
         self.assertEqual(ctx.exception.code, 403)
 
     def test_an_unsafe_link_never_reaches_the_tracker_page(self):
-        conn = db.connect(str(viewer.DB_PATH))
+        conn = self.site.db()
         conn.execute("UPDATE jobs SET url='javascript:alert(1)' WHERE id='greenhouse:acme:2'")
         conn.commit()
         conn.close()

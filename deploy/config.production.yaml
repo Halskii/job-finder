@@ -1,0 +1,154 @@
+# Settings for the deployed service (mounted into the container as config.yaml). No secrets here: those are in .env on the server.
+# Edits to `limits:` apply at once; most other settings apply after: docker compose restart app
+
+# What each person searches for (titles, words to skip, places, pay, how old) is NOT set here: it comes from their own account (the Profile page).
+max_age_days: 30          # how recent a posting must be for the job feeds and government sources to return it
+crawl_every_days: 30    # the web app looks for new company boards (for everyone's titles) this often. 0 = only when you run `python main.py crawl --add`
+fetch_every_hours: 24    # the app reads every source for all users once a day
+keep_postings_days: 14   # postings no source has listed for this long are deleted (unless a user has them as one of their jobs)
+store_max_age_days: 90   # postings clearly older than this are not stored at all
+# Paid calls (scoring, resume tailoring, interview prep, resume reading) allowed per day: for one person, and for the whole site together.
+# Scoring's per-person limit is scoring.max_per_user_per_day. Read on every check, so edits apply at once. paused: true stops them all (a kill switch).
+limits:
+  per_user_per_day: {tailor: 6, tips: 12, analyze: 6}
+  all_users_per_day: {score: 1500, tailor: 40, tips: 100, analyze: 40}
+  paused: false
+request_delay: 0.4        # seconds between HTTP requests (be polite to job boards)
+
+profile_model: claude-sonnet-5-5   # used by `main.py profile` to read resume.pdf
+tailor_model: claude-fable-5-1     # used by the viewer's "Tailor resume + cover letter" button
+onboard_model: claude-haiku-5-5    # used by the profile page to suggest job titles from a resume (the facts come from profile_model)
+tips_model: claude-haiku-5-5       # used by the "Interview prep" button on a job's page
+tips_web_search: true              # let it search the web for what candidates report (about 1 cent per search, plus the extra tokens)
+
+scoring:
+  model: claude-haiku-4-5-20251001   # cheap first pass; switch to claude-sonnet-5-5 for deeper analysis
+  max_per_run: 40                    # cap LLM calls per `main.py run` to control cost
+  initial_batch: 50                  # the web app scores this many of a user's best matches at once, so there is something to read straight away
+  batch_size: 50                     # then keeps going in background batches of this size
+  max_per_user_per_day: 200          # paid scoring calls one user can use in a day; the rest wait until tomorrow
+  workers: 8                          # scoring calls made at the same time (lower this if you see rate-limit errors)
+  report_min_score: 60               # only show jobs scoring at least this in the report
+  report_size: 1000
+  price_per_million_tokens: {input: 1.0, output: 5.0}   # USD for the scoring model above; edit if prices change
+
+# A starting set of titles for the SHARED fetch and crawl only: every user's own titles are added to these, and these decide what the sites that search
+# by title (Workday, the job feeds) and the monthly crawl look for. They are not shown to or applied to anyone as their search.
+# Empty the list to fetch only for what people have actually saved. Level markers (I, II, Junior) are ignored.
+titles:
+  - Software Engineer I
+  - Software Engineer II
+  - Associate Software Engineer
+  - Junior Software Engineer
+  - Backend Software Engineer
+  - Full Stack Software Engineer
+  - Platform Engineer
+  - Cloud Engineer
+  - DevOps Engineer
+  - Site Reliability Engineer
+  - Data Engineer
+  - Machine Learning Engineer
+  - AI Engineer
+  - Application Developer
+
+# Search words for Workday sites (they have a free-text title search). 'auto' derives them from `titles` above
+# (level markers like I / II / III / Associate / Junior are dropped), so you only edit one list. You can also give
+# your own list, or mix: [auto, devops, "machine learning"] adds extra words to the derived ones.
+workday_search_terms: auto
+workday_max_pages: 3
+workday_workers: 16       # Workday sites read at the same time (each site still gets one request at a time)
+detail_workers: 16        # servers asked for full postings at the same time (same rule: one request at a time per server)
+fetch_workers: 8          # Greenhouse / Lever / Ashby / Gem / ... boards read at the same time
+crawl_workers: 16         # boards checked at the same time by `main.py crawl`
+
+# Job boards. Add any company that uses these systems (or let `main.py discover` / `main.py workday-add` do it for you):
+#   Greenhouse:      boards.greenhouse.io/<slug> or job-boards.greenhouse.io/<slug>
+#   Lever:           jobs.lever.co/<slug>
+#   Ashby:           jobs.ashbyhq.com/<slug>
+#   SmartRecruiters: jobs.smartrecruiters.com/<CompanyId>
+#   Workday:         https://<host>/en-US/<site>/...   ->  {name, host, tenant, site}
+# Slugs that don't exist are skipped with a warning.
+sources:
+  greenhouse: [anthropic, databricks, stripe, airbnb, cloudflare, datadog, gitlab, coinbase, figma, robinhood, samsara, twilio, okta, mongodb, elastic]
+  lever: [palantir, spotify]
+  ashby: [openai, ramp, notion, linear, vercel]
+  smartrecruiters: []
+  workday: []
+  # Example Workday entry:
+  #  - {name: Vanguard, host: vanguard.wd5.myworkdayjobs.com, tenant: vanguard, site: vanguard_external}
+
+# Turn a whole platform off by setting it to false (a platform not listed here is on). Its boards stay in your lists and
+# are skipped, with a note in the run output. Aggregator feeds and government sources have their own `enabled:` below.
+platforms:
+  greenhouse: true
+  lever: true
+  ashby: true
+  smartrecruiters: true
+  workable: true
+  recruitee: true
+  bamboohr: true
+  rippling: true
+  gem: true
+  personio: true
+  workday: true
+
+# Aggregator feeds, each on when `enabled: true`. Each is fetched at most once per `min_hours` (default 6; Remotive asks for
+# at most ~4 requests a day). Job links go to the feed's own site, as their terms require. Remotive details:
+# Its job links go to remotive.com, as their terms require. Categories: software-development, devops,
+# artificial-intelligence, engineering, information-technology, data, qa.
+feeds:
+  remotive:
+    enabled: true
+    min_hours: 6
+    categories: [software-development, devops, artificial-intelligence]
+  remoteok:                  # remoteok.com; job links go to remoteok.com, as their terms require
+    enabled: true
+  weworkremotely:            # RSS feeds; categories are the names in weworkremotely.com/categories/<name>
+    enabled: true
+    categories: [remote-programming-jobs, remote-devops-sysadmin-jobs, remote-back-end-programming-jobs]
+  jobicy:                    # searched with your title words (override with `terms: [...]`); US-eligible jobs only
+    enabled: true
+  workingnomads:
+    enabled: true
+  himalayas:                 # searched with your title words, 20 results a page
+    enabled: true
+    pages: 2
+  adzuna:                    # large US aggregator; needs free keys in .env (ADZUNA_APP_ID, ADZUNA_APP_KEY)
+    enabled: false
+    min_hours: 12
+    pages: 2
+  jooble:                    # aggregator; needs a free key in .env (JOOBLE_API_KEY)
+    enabled: false
+    min_hours: 12
+    pages: 2
+  hackernews:                # the monthly "Ask HN: Who is hiring?" threads, one job per top-level comment
+    enabled: true
+    threads: 2
+
+# Extra search words for the government sources and Workday sites marked `gov: true`, part of the shared fetch. They are titled differently from tech companies
+# (for example Texas 'Programmer III' or federal 'IT Specialist (APPSW)'). Level markers are optional.
+gov_titles:
+  - Programmer
+  - Programmer Analyst
+  - Java Developer
+  - Software Developer
+  - Application Developer
+  - Web Developer
+  - Developer
+  - IT Specialist
+  - Computer Scientist
+  - Computer Engineer
+
+# Government sources, on by default. Set enabled: false to turn one off.
+#  usajobs: the federal API. Needs a free key: add USAJOBS_API_KEY and USAJOBS_EMAIL (the email the key was issued to)
+#           to .env. Without them it is skipped with a note.
+#  texas_hhs: careers.hhs.texas.gov (HHSC, DFPS, DSHS). No API exists, so the public search pages are read.
+government:
+  usajobs:
+    enabled: true
+    keywords: [software developer, software engineer, IT specialist, programmer, devops, cloud engineer]
+    pages: 2
+  texas_hhs:
+    enabled: true
+    search_terms: [developer, programmer, software, engineer, devops]
+    pages: 2

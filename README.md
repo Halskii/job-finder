@@ -8,13 +8,13 @@ A small pipeline that finds job postings that fit you, filters them, scores each
 company job boards, remote feed, government sites
 (Greenhouse, Lever, Ashby, SmartRecruiters, Workday, Remotive, USAJobs, Texas HHS)
    -> title / location / pay / age filters -> de-duplication -> keyword pre-rank
-   -> Claude fit scoring -> report (reports/*.md) -> web viewer + application tracker (jobs.db)
+   -> Claude fit scoring -> report (reports/*.md) -> web viewer + application tracker (PostgreSQL)
 ```
 
 ## Daily use
 
 1. `python main.py run` fetches, filters, scores, and writes today's report. (`--no-llm` fetches and filters without using any API credits.)
-2. `python viewer.py` opens the report in your browser. Click a job to read it, **Open original posting** to apply on the real page, then **Mark as applied** to log it.
+2. `python web.py` opens the site in your browser (sign in first, see Accounts below). Click a job to read it, **Open original posting** to apply on the real page, then **Mark as applied** to log it.
 3. **Tailor resume + cover letter** on any job makes a resume and cover letter PDF for that posting (see below). **Interview prep** writes the interview process and a study list in a side panel and keeps it in the **Interview Prep** tab.
 4. The **Tracker** tab shows how many places you have applied to this week, this month, and all time, and lets you update each one as you hear back.
 
@@ -39,6 +39,16 @@ copy config.example.yaml config.yaml      # your settings: titles, pay floor, lo
 copy profile.example.json profile.json    # your facts; edit it, then run `python main.py profile`
 ```
 
+Data is stored in PostgreSQL (17 or newer). Install it (`winget install PostgreSQL.PostgreSQL.17`), then create a database and a user for it, and put the address in `.env` as `DATABASE_URL` (the template shows the form):
+
+```sql
+CREATE ROLE jobfinder LOGIN PASSWORD 'choose-a-password';
+CREATE DATABASE jobfinder OWNER jobfinder;
+CREATE DATABASE jobfinder_test OWNER jobfinder;   -- for the tests (TEST_DATABASE_URL)
+```
+
+The tables are created the first time the program connects. If you have an older `jobs.db` from before PostgreSQL, copy it in once with `python migrate_sqlite.py` (it only reads the file and can be run again safely).
+
 `config.yaml`, `profile.json`, and `.env` are git-ignored, so your personal settings never get committed; the `*.example.*` files are the shared templates. Without them the program stops with a message saying which file to copy.
 
 Put your resume in the project folder as `resume.pdf` (a `resume.txt` or `resume.md` also works; the PDF is preferred if several exist). Use your most general resume, not a tailored one.
@@ -48,6 +58,8 @@ Put your resume in the project folder as `resume.pdf` (a `resume.txt` or `resume
 | Key | Needed for |
 |---|---|
 | `ANTHROPIC_API_KEY` | Scoring and `main.py profile`. Without it, `run` still fetches and stores jobs |
+| `DATABASE_URL`, `TEST_DATABASE_URL` | The PostgreSQL databases (see Setup). The second is only for running the tests |
+| `GOOGLE_CLIENT_ID` | Optional. Turns on the "Continue with Google" button (see Accounts). A public value, not a secret |
 | `USAJOBS_API_KEY` and `USAJOBS_EMAIL` | Optional. Federal jobs from USAJobs (see "Government jobs") |
 | `ADZUNA_APP_ID` and `ADZUNA_APP_KEY` | Optional. The Adzuna feed (see "Adding more boards") |
 | `JOOBLE_API_KEY` | Optional. The Jooble feed |
@@ -66,16 +78,19 @@ You can call the virtual environment's Python directly without activating it, fo
 | `python main.py list --top 15` | Best scored jobs from the database (`--min-score N` to change the cutoff) |
 | `python main.py mark <id> applied "note"` | Set a job's status. `<id>` can be any unique fragment of a job id. `applied` also records today as the date applied |
 | `python main.py discover Stripe "Palo Alto Networks"` | Look for those companies' job boards (see "Adding more boards"). Add `--add` to save what it finds, or `--file companies.txt` for a list |
-| `python main.py crawl --add` | Find company boards **in bulk** from Common Crawl's public web index, check each one, and save the ones with a posting matching your titles (see "Adding more boards") |
+| `python main.py crawl --add` | Find company boards **in bulk** from Common Crawl's public web index, check each one, and save the ones with a posting for anyone's titles. The web app also runs it by itself (see "Adding more boards") |
 | `python main.py workday-add <careers URL>` | Add a Workday careers site from any page address on it |
-| `python viewer.py` | Open the report viewer and application tracker in your browser (see below) |
+| `python web.py` | Start the web app: sign-in, the report viewer and the application tracker, in your browser (see Accounts and below). `python viewer.py` does the same |
+| `python main.py fetch` | Read every source once for all users and keep the postings (run daily; see Accounts). `run` is the older single-user version that also filters and scores for you |
+| `python main.py invite add EMAIL ...` / `invite list` / `usage` | Choose who may sign up, and see what each person's paid calls added up to |
+| `python claim_local.py you@gmail.com` | Attach the data you made before accounts existed to your account (see Accounts) |
 | `python main.py reformat` | Restore the formatting of postings stored as plain text (the viewer also does this in the background) |
 | `python inspect_db.py` | Peek at what is stored (`--where "california"` searches locations, `--odd` lists senior/staff/lead titles that slipped through) |
 | `python -m unittest` | Run the offline tests (no network, no API key) |
 
 Statuses: `new, saved, applied, skipped, interview, offer, accepted, rejected, withdrawn`. Jobs marked anything other than `new` or `saved` are excluded from future reports. Every status from `applied` onward (`applied, interview, offer, accepted, rejected, withdrawn`) counts the job as an application in the tracker.
 
-Typical first run: `profile` (review the diff, answer `y`), then `run`, then `viewer.py`.
+Typical first run: `profile` (review the diff, answer `y`), then `run`, then `claim_local.py` (once), then `web.py`.
 
 ### Reading a run's output
 
@@ -104,9 +119,10 @@ Sites that forbid bots in their terms or `robots.txt` (LinkedIn, Indeed, Glassdo
 - **`discover`** guesses a company's board address from its name and tries Greenhouse, Lever, Ashby, and SmartRecruiters. For each one it finds, it shows how many postings the board has, how many match your title, location, and pay filters, and one example posting with its link. **Check the example is the company you meant**, since a short name can match someone else's board. Nothing is saved until you run it again with `--add`. A name it can't find is usually a company on Workday or its own system, or one whose board name differs from its brand: for SmartRecruiters you can pass the exact id, for example `discover BoschGroup`.
 - **`crawl`** finds boards in bulk, with no company names needed. [Common Crawl](https://commoncrawl.org) publishes a free index of web addresses, and every company on Greenhouse, Ashby, Workday and the rest has addresses such as `boards.greenhouse.io/<company>/jobs/123`. `crawl` lists those, takes the company name out of each, asks the platform's own job API whether the board exists, and keeps boards that currently list a posting matching your titles and locations (`--keep-all` keeps every live board). Run `python main.py crawl` first to see what it would add, then `python main.py crawl --add` to save. `--systems greenhouse,ashby` limits it to some platforms and `--crawls N` reads more or fewer recent crawls (default 4; more crawls find more boards). Common Crawl's index is a shared free service that answers slowly and sometimes refuses connections, so the program reads it gently (one page every couple of seconds) and a platform it cannot read is skipped with a note. If it keeps refusing you, wait an hour or so and run it again; that is not an error in your setup. It remembers what it has read and checked in `crawl_cache.json`, so running it again only does new work; boards that failed are asked again after 14 days, or at once with `--recheck`. Re-run it now and then: a board only joins your list when it has a matching posting on the day it is checked.
 - **`workday-add`**: open the company's careers page, click any job, copy the address from the browser bar, and run `python main.py workday-add "<address>"`. It reads the host, tenant, and site out of the address, confirms the site responds, and saves it. Use `--name "Company"` for a nicer label.
-- Boards added this way are stored in `discovered_sources.yaml` and merged with `sources` in `config.yaml` each run, so `config.yaml` and its comments are never rewritten. You can also add slugs to `config.yaml` by hand, including a `smartrecruiters:` list (`jobs.smartrecruiters.com/<CompanyId>`, not case sensitive).
+- Boards added this way (`crawl`, `discover`, `workday-add`) are stored in the database and merged with `sources` in `config.yaml` each run, so `config.yaml` and its comments are never rewritten. The boards you type into `config.yaml` are never changed or removed. A board that is **found gone** (not found) on three fetches in a row is dropped from the database automatically, and `crawl` can find it again if it comes back. An older `discovered_sources.yaml` is copied into the database the first time it is needed and then left alone.
 - **Feeds** (`feeds:` in `config.yaml`, each on with `enabled: true`): Remotive, Remote OK, We Work Remotely, Jobicy, Working Nomads, Himalayas, and the monthly **Hacker News "Who is hiring?"** threads (one job per top-level comment, read from the first line `Company | Role | Location`). Jobicy and Himalayas are searched with your title words (Himalayas has over 100,000 postings, so it can't be read whole). Two broad aggregators, **Adzuna** and **Jooble**, are off until you add a free key to `.env` and set `enabled: true` (they return only a short snippet of each description, so scoring has less to go on). Each feed is fetched at most once every `min_hours` (default 6; Remotive asks for no more than about four requests a day) no matter how often you run the program. Every feed's job links go to its own site, as the terms of each require, and a job's `source` names it.
 - **Duplicates:** if the same company and title is already stored from a different source, for example a job on both a company's board and Remotive, the second copy is skipped (shown as `duplicates` in the run summary). The same title in two different cities from one source is kept, because those are separate postings.
+- **It runs by itself.** You do not need to run `crawl` by hand. While the web app is running it (1) crawls **at once** for any title someone saves that no crawl has searched for yet (boards that were rejected before are asked again, since the title is different), then fetches so their jobs appear, and (2) crawls for everyone's titles **every `crawl_every_days` days** (default 30, since Common Crawl publishes about monthly and companies do not change daily; 0 turns it off), also followed by a fetch when it finds boards. A board is kept when it lists a posting for any user's title, ignoring each person's own skip-words, places and pay floor, so it is useful to someone. Only one crawl runs at a time, and one that was started less than an hour ago is not started again in case it failed.
 - **Many Workday sites:** `workday-add` and `discovery` can build a list of a hundred or more sites. Sites are read several at a time (`workday_workers`), each with one request at a time. A first run over ~100 sites read 22,000 postings and stored ~700 new matches. With the Workday sites plus about 1,400 Greenhouse, Ashby and SmartRecruiters boards from `crawl` and the feeds, a first run read about 114,000 postings and stored about 2,200 matches in under ten minutes; each run prints how long listing, full-posting lookups, and scoring took. Later runs only fetch details for postings not yet stored, so they are faster. With that many sites, use a short `workday_search_terms` list rather than `auto`.
 - Not included: Breezy (its postings are drawn by JavaScript, so there is no text to read), The Muse (needs a key), Lever in bulk (Lever blocks Common Crawl's crawler, so `crawl` finds no Lever boards; add them by name with `discover` or by hand), and Oracle, iCIMS, Taleo, and SuccessFactors career sites (no uniform public data).
 
@@ -121,7 +137,7 @@ Both are under `government:` in `config.yaml`; set `enabled: false` on one to tu
 
 ## Viewing matches in the browser
 
-`python viewer.py` starts a small local server (`http://127.0.0.1:8765/`, your machine only) and opens it. It reads the Markdown files in `reports/`, so the list in the sidebar is exactly what the report says, and joins each entry to the stored posting in `jobs.db` by its `ID` line.
+`python web.py` starts the web app (`http://localhost:8765/`, your machine only unless you pass `--host`; open it at `localhost`, not `127.0.0.1`, or Google sign-in is refused) and opens it. It reads the Markdown files in `reports/`, so the list in the sidebar is exactly what the report says, and joins each entry to the stored posting in `jobs.db` by its `ID` line.
 
 - Sidebar: pick a report date, filter by title or company, click a job (or press `j` / `k` to move). Each job has its own address (`#id`), so back and forward work. The **Matches** and **Tracker** tabs at the top switch between the job pages and the application tracker.
 - Detail pane: score, verdict, matched and missing skills, resume angle, and the full stored posting text. **Open original posting** opens the real page in a new tab. Job sites generally forbid embedding their pages in another page, so the posting is shown from the saved copy instead.
@@ -160,7 +176,7 @@ How it works:
 - **Interview prep** (button on any job's page, tracked or not) opens a panel on the right of the screen and writes, as you watch, how the interview for that role and company usually runs, which topics to study, how to prepare, and what to ask. It uses `tips_model` from `config.yaml` (default Haiku 5.5). The first words appear in about 5 seconds and the whole thing takes about 15, for roughly 3 cents.
   - **Topics to study** is a prioritized list (High, Medium, Low priority) built from the posting's requirements and the stages of the process, and it says where your profile is strong and where it has a gap, including skills the posting wants that `profile.json` does not list.
   - **Where the facts come from:** Claude searches the web (up to 5 searches) for what candidates report, such as Glassdoor and the company's own pages. Each stage is tagged **Reported** (candidates or the company report it) or **Typical pattern** (the usual pattern at similar companies, with no report found), and the pages the search found are listed under **Sources the search found**. Links are only pages that really came back from the search. If nothing useful turns up, the answer says so and marks every stage typical. Set `tips_web_search: false` to turn searching off (faster and cheaper, but only what the model remembers).
-  - **Interview Prep section:** every answer is saved in `jobs.db` and listed in the **Interview Prep** tab in the left panel (also an entry in the report menu), newest first. Click one to read it again in the side panel at no cost. **Regenerate** (with a confirmation) asks Claude again.
+  - **Interview Prep section:** every answer is saved in the database and listed in the **Interview Prep** tab in the left panel (also an entry in the report menu), newest first. Click one to read it again in the side panel at no cost. **Regenerate** (with a confirmation) asks Claude again.
   - Every result carries a disclaimer that the real interview may differ and to confirm details with your recruiter. It sends your `profile.json` facts, the posting, and your round notes to the API (not your phone or email). If you close the panel or leave the page while it is writing, it still finishes and saves.
 - **From the command line:** `python main.py mark <id> applied` records today's date the same way, so the two stay consistent.
 - Only jobs this program has found can be added. Applications you made elsewhere are not in the tracker unless you also find them in a report. The dates are stored in `jobs.db` (column `applied_at`), which is created automatically.
@@ -181,6 +197,7 @@ How it works:
 - `scoring`: `model`, `max_per_run` (cost cap), `workers` (API calls at the same time, default 8; lower it if you hit rate limits), `report_min_score`, `report_size`, `price_per_million_tokens`
 - `profile_model`: the model used by `main.py profile`
 - `tailor_model`: the model behind the viewer's **Tailor resume + cover letter** button
+- `onboard_model`: the model that suggests job titles on the profile page (default Haiku 5.5)
 - `tips_model`: the model behind the **Interview prep** button (default Haiku 5.5); `tips_web_search` turns its web search on or off
 - On/off switches, one per source type. `platforms:` has a `true`/`false` line for each board platform (`greenhouse`, `lever`, `ashby`, `smartrecruiters`, `workable`, `recruitee`, `bamboohr`, `rippling`, `gem`, `personio`, `workday`). Set one to `false` and a run skips every board of that platform, printing a "turned off" note; the boards stay in your lists, so setting it back to `true` restores them. A platform you leave out is on. A misspelled name is reported, not silently ignored. Aggregator feeds (`feeds.<name>.enabled`) and government sources (`government.<name>.enabled`) have their own `enabled:` switch. These switches only affect `run`; `crawl` and `discover` still look for boards on every platform you ask for.
 - `sources`: company boards to read
@@ -205,25 +222,51 @@ How it works:
 | `filters.py` | Title, location, pay, and age filters, plus the keyword pre-score |
 | `scorer.py` | Claude fit scoring |
 | `profile_gen.py` | Builds `profile.json` from the resume |
-| `db.py` | SQLite storage, cross-source de-duplication, job statuses, and the application tracker (dates and week / month / all-time counts) |
-| `viewer.py` | Local web viewer for the reports and the application tracker |
+| `db.py` | PostgreSQL storage: postings shared by all users, and each user's scores, statuses, tracker, interview rounds and prep, kept apart by row-level security in the database. Also cross-source de-duplication |
+| `migrate_sqlite.py` | One-time copy of an old `jobs.db` (SQLite) into PostgreSQL for one user |
+| `web.py` | The web server (FastAPI): sign-in, the JSON API behind the page, file downloads |
+| `viewer.py` | What the page shows one signed-in user (reports joined to postings, saved, trash, prep, tracker) and the page itself |
+| `limits.py`, `privacypage.py` | Daily caps and the pause switch for paid calls; the privacy page |
+| `Dockerfile`, `docker-compose.yml`, `deploy/` | Running it on a server: the image, HTTPS, the production settings and the step-by-step guide |
+| `ingest.py` | The shared fetch: storing every posting for all users, deleting stale ones, reading full text on demand, queueing the users |
+| `pipeline.py` | Matching the shared postings to each user's search and scoring the matches in batches, with the queue and background worker |
+| `onboarding.py`, `profilepage.py` | The profile page: reading a resume to suggest job titles and fill a profile, and checking everything the person edits before it is saved |
+| `auth.py`, `loginpage.py` | Accounts: password hashing, sign-in with a password or Google, sessions, and the sign-in page |
+| `userdata.py`, `claim_local.py` | Each user's own folder under `data/users/<id>/` (profile, resume, reports, made files), and attaching your earlier data to your account |
 | `errors.py` | Errors written for the person using the program, and the translation of every other error into one |
 | `tailor.py` | The viewer's resume and cover letter button: one Claude call, then PDFs in `Optimized Resumes/` |
 | `reformat.py` | Gives postings stored as plain text their original formatting back, one at a time, when you open them |
-| `tips.py` | The Interview prep button: one streamed Claude call with web search, saved in `jobs.db` |
+| `tips.py` | The Interview prep button: one streamed Claude call with web search, saved in the database |
 | `inspect_db.py` | Quick look at what is stored |
 | `config.example.yaml`, `profile.example.json`, `.env.example` | Templates to copy (see Setup) |
 | `config.yaml`, `profile.json`, `.env` | Your own settings, verified facts, and keys. Git-ignored; never commit them |
-| `discovered_sources.yaml` | Boards added by `discover --add`, `workday-add` and `crawl --add` (created on first use, git-ignored) |
+| `boards.py` | The discovered boards in the database, and dropping the ones that are gone |
+| `discovered_sources.yaml` | The older place discovered boards were kept; copied into the database once, then unused (git-ignored) |
 | `crawl_cache.json` | What `crawl` has already read and checked, so reruns are quick (git-ignored; safe to delete) |
-| `jobs.db`, `reports/` | Stored postings, scores, and the tracker; daily Markdown reports (git-ignored) |
+| `reports/` | Daily Markdown reports (git-ignored). Postings, scores and the tracker live in PostgreSQL |
 | `LICENSE` | All rights reserved: viewable for evaluation, not for reuse |
 | `tests/` | Offline tests (`tests/data/` holds a saved page sample). Run with `python -m unittest` |
+
+## Accounts
+
+People sign up with an email and password or with Google, and each account sees only its own jobs, scores, tracker, interview rounds, interview prep, resume, and the files made for it. Postings themselves are shared, because they are public. The separation is enforced by the database (row-level security in PostgreSQL), not only by the code, so a query that forgets to filter by user still returns only that user's rows. The tests in `tests/test_isolation.py` and `tests/test_web_auth.py` check this, including one user trying to read, change, or download another's data.
+
+- **Passwords** are stored as salted scrypt hashes, at least 10 characters, with a lockout after 8 wrong tries for an email within 15 minutes. **Sessions** are random tokens in an HttpOnly, SameSite cookie (Secure over https); only a hash of the token is stored, and signing out ends it on the server.
+- **Google sign-in** needs an OAuth client ID. In the Google Cloud console create one (type: Web application), add your site's address (`http://localhost:8765` here, your domain later) under **Authorized JavaScript origins**, and put the ID in `.env` as `GOOGLE_CLIENT_ID`. The server verifies Google's signed token itself; no client secret is needed. Email is not confirmed for password sign-ups yet, so if someone later signs in with Google using the same address, any password on that unconfirmed account is removed first.
+- **Your earlier data.** Everything made before accounts belongs to a built-in `local@localhost` account. Run `python claim_local.py you@gmail.com` once: it renames that account to your email (so signing in with Google, or signing up with the same email, lands on it) and copies your profile, resume, reports and Optimized Resumes into `data/users/<your id>/`.
+- **The profile page** (`/profile`, and the **Profile** button in the header) is where a new account starts. The person uploads a resume PDF (up to 5 MB, 12 pages, readable text), or pastes it, or just describes their experience in a few sentences. **Read my resume** makes two Claude calls (about 10 seconds): one suggests 10 to 16 job titles and the title words to skip for their level, the other lists the facts the resume states (skills, education, years). Nothing is saved until they edit it and press **Save**, and a skill they list under "things I do not have" is never kept as a skill. Search limits (minimum pay, posting age, US only, places to skip) are set there too. Settings are saved in `data/users/<id>/settings.json` and the profile in `profile.json`.
+- **Finding and scoring matches.** When a person saves their profile, the app filters every stored posting against their titles, skip-words, places, pay floor and posting age (free, a couple of seconds), then scores with Claude: the best 50 at once, and the rest in background batches of 50, best keyword match first. The page shows a progress note and the **Current matches** list fills in as batches finish. A day's scoring is capped by `scoring.max_per_user_per_day` (default 400), and the other matches are scored the next day. Each user's paid calls are counted per day in the `usage` table. **Check for new jobs** runs it again; changing the search checks everything again, an unchanged one only looks at postings fetched since the last run. A failure that every call would repeat (no API key, no credit) stops the run and says so on the page; one job that fails is skipped. Runs are queued and done one user at a time by a background thread (`pipeline.py`), and any run that was in progress when the server stopped is resumed on start. Today the postings come from `python main.py run`; fetching them for everyone on a schedule is the next step.
+- **The shared fetch.** `python main.py fetch` reads every source in `config.yaml` once for everyone (the sites that search by title are searched with the titles of all users plus the ones in the config), stores every posting, deletes the ones no source has listed for `keep_postings_days` (14) unless a user has them among their jobs, and marks each user who has a search as waiting for a new run. Run it daily from a scheduler; or set `fetch_every_hours: 24` and the web app does it itself. Only one fetch runs at a time. Sites that list only titles (Workday, SmartRecruiters, Workable, BambooHR, Rippling) are stored with how to read the full posting, and it is read the first time someone's search selects it, after which it is kept for everyone. The web app checks every minute for users marked as waiting, so a fetch run from a scheduler in another process still gets everyone's searches done.
+- **Invite-only sign-ups.** By default only invited emails can create an account (`SIGNUP_MODE=invite`): `python main.py invite add friend@example.com`, `invite list`, `invite remove`. People who already have an account are never affected, and Google sign-in follows the same rule. Set `SIGNUP_MODE=open` on your own computer.
+- **Spending limits.** Scoring, resume tailoring, interview prep and resume reading each have a per-person and a whole-site daily cap (`limits:` in `config.yaml`, read on every check), and `paused: true` stops them all at once. `python main.py usage` shows each day's calls and tokens, per person.
+- **Deleting an account.** The Profile page has a **Delete my account** button (type your email to confirm): the account, resume, profile, jobs, notes and generated files are removed at once. `/privacy` says in plain words what is stored and what is sent to Claude.
+- **Deploying** to a server (Docker, HTTPS, the database, backups, seeding your data) is written step by step in [deploy/README.md](deploy/README.md).
+- **Serving it online** needs `ALLOWED_HOSTS` (your domain), and behind HTTPS also `COOKIE_SECURE=1` and `TRUST_PROXY=1`; the template `.env.example` explains each. Not built yet: email confirmation and password reset (they need an email service), and per-user usage limits.
 
 ## Notes
 
 - Cost: the pre-score picks which jobs go to Claude first, and `scoring.max_per_run` caps API calls per run. Each full run prints the tokens used and an estimated cost; check your usage on Anthropic's dashboard too.
-- Privacy: `.env`, `jobs.db`, `reports/`, `config.yaml`, `profile.json`, `discovered_sources.yaml`, `Optimized Resumes/`, and your resume files are git-ignored. Resume lines containing an email, a LinkedIn or GitHub link, or a phone number are stripped before any API call. The viewer listens only on your own computer and ignores requests addressed to any other host name.
+- Privacy: `.env`, `jobs.db` (if you still have it), `reports/`, `config.yaml`, `profile.json`, `discovered_sources.yaml`, `Optimized Resumes/`, and your resume files are git-ignored. Resume lines containing an email, a LinkedIn or GitHub link, or a phone number are stripped before any API call. The viewer listens only on your own computer and ignores requests addressed to any other host name.
 - Be polite: requests are spaced by `request_delay`. Use this only for your own job search and respect each site's terms.
 - Not included on purpose: LinkedIn and Indeed scraping (against their terms and brittle), WorkInTexas and governmentjobs.com (their `robots.txt` asks automated programs to stay out), and auto-submitting applications.
 - Known limits: only companies on the supported boards are covered. Workday, SmartRecruiters, and Texas HHS postings need one extra request each for the full text, made only for title matches that are not stored yet. Workday's list gives an approximate age ("Posted 30+ Days Ago"), so postings that are clearly too old are dropped without a lookup; ones rejected later for pay are looked up again on later runs. The USAJobs, Adzuna and Jooble sources have not been run against their live APIs (they need keys). The Texas HHS source depends on that site's page layout.

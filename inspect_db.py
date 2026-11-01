@@ -1,9 +1,8 @@
 """Quick look at what's stored. Usage: python inspect_db.py [--odd]"""
-import sqlite3
+import db
 import sys
 
-c = sqlite3.connect("jobs.db")
-c.row_factory = sqlite3.Row
+c = db.connect()
 if "--where" in sys.argv:   # python inspect_db.py --where "california"  -> stored jobs whose location contains the text
     term = sys.argv[sys.argv.index("--where") + 1].lower()
     hits = [r for r in c.execute("SELECT company,title,location FROM jobs") if term in (r["location"] or "").lower()]
@@ -17,7 +16,7 @@ if "--odd" in sys.argv:
         print(f"{r['company'][:14]:14s} {r['title'][:70]} | {(r['location'] or '')[:30]}")
     sys.exit()
 rows = c.execute("SELECT company,title,location,pay_min,pay_max,posted,quick_score FROM jobs "
-                 "ORDER BY quick_score DESC LIMIT 14").fetchall()
+                 "ORDER BY quick_score DESC NULLS LAST LIMIT 14").fetchall()
 for r in rows:
     print(f"{r['quick_score']:5.1f} {r['company'][:14]:14s} {r['title'][:46]:46s} | {(r['location'] or '')[:28]:28s} | "
           f"{r['pay_min']}-{r['pay_max']} | {r['posted']}")

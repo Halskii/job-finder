@@ -19,10 +19,10 @@ from pathlib import Path
 import yaml
 
 import scorer
+import userdata
 from errors import BadModelAnswer, UserError
 
 ROOT = Path(__file__).parent
-OUT_DIR = ROOT / "Optimized Resumes"
 MODEL = "claude-fable-5-1"   # overridden by `tailor_model:` in config.yaml
 
 SYSTEM = """You tailor one candidate's resume to one job posting and write a cover letter for it. Rules:
@@ -75,11 +75,11 @@ def make_client():
     return anthropic.Anthropic(api_key=key, max_retries=6)
 
 
-def load_profile() -> dict:
-    """profile.json, or a UserError saying how to make it."""
-    path = ROOT / "profile.json"
+def load_profile(home: Path | None = None) -> dict:
+    """The user's profile.json (from their folder, or the project folder for the single-user tools), or a UserError."""
+    path = (home or ROOT) / "profile.json"
     if not path.exists():
-        raise UserError("profile.json was not found. Create it first (see the README), then try again.", "no_profile")
+        raise UserError("Your profile is not set up yet. Add your details first, then try again.", "no_profile")
     return json.loads(path.read_text(encoding="utf-8"))
 
 
@@ -354,7 +354,9 @@ def html_to_pdf(page: str, out: Path) -> None:
         src = Path(tmp) / "page.html"
         src.write_text(page, encoding="utf-8")
         try:
-            subprocess.run([find_browser(), "--headless", "--disable-gpu", "--no-pdf-header-footer",
+            # inside a container the browser cannot start its own sandbox, and /dev/shm is small (CHROME_NO_SANDBOX=1 is set there)
+            sandbox = ["--no-sandbox", "--disable-dev-shm-usage"] if os.environ.get("CHROME_NO_SANDBOX") == "1" else []
+            subprocess.run([find_browser(), "--headless", "--disable-gpu", "--no-pdf-header-footer", *sandbox,
                             f"--user-data-dir={Path(tmp) / 'profile'}", f"--print-to-pdf={out.resolve()}", src.as_uri()],
                            check=True, capture_output=True, timeout=90)
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
@@ -381,17 +383,20 @@ def write_one_page(make_page, sizes, out: Path) -> int:
 
 # ------------------------------------------------------------ the whole job
 
-def tailor_job(conn, job_id: str, out_dir: Path = OUT_DIR, client=None, resume_request: str = "", letter_request: str = "") -> dict:
+def tailor_job(conn, job_id: str, out_dir: Path | None = None, client=None, resume_request: str = "", letter_request: str = "",
+               home: Path | None = None) -> dict:
     """Write <Name>_<Role>_<Company>_resume.pdf and ..._cover_letter.pdf for a stored job, plus the same two as editable .docx files.
     Returns {"files": [pdfs], "word_files": [docx], "folder": str, "pages": {...}, "tokens": {"in": n, "out": n}}."""
     import main   # imported here so the viewer only loads it when this button is used
+    home = home or userdata.home(conn.user_id)   # this user's own folder
+    out_dir = out_dir or home / "Optimized Resumes"
     row = conn.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
     if row is None:
         raise LookupError("no such job")
-    profile = load_profile()
-    resume_text, raw = main.load_resume(), main.read_resume_file()
+    profile = load_profile(home)
+    resume_text, raw = main.load_resume(home), main.read_resume_file(home)
     if not resume_text:
-        raise UserError("No resume found. Put your resume in the job-finder folder as resume.pdf (or resume.txt), then try again.", "no_resume")
+        raise UserError("No resume found. Upload your resume first, then try again.", "no_resume")
     client = client or make_client()
     model = config_value("tailor_model", MODEL)
     data, tok_in, tok_out = ask(client, model, profile, resume_text, row, resume_request, letter_request)

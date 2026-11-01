@@ -1,5 +1,5 @@
 """Offline tests for keeping a posting's formatting: the HTML to Markdown conversion, the fetchers, and restoring old postings."""
-import sqlite3
+
 import tempfile
 import unittest
 from pathlib import Path
@@ -9,6 +9,7 @@ from unittest import mock
 import requests
 
 import db
+from tests import pgtest
 import reformat
 import sources
 
@@ -71,7 +72,7 @@ class RestoreTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.path = str(Path(self.tmp.name) / "jobs.db")
-        self.conn = db.connect(self.path)
+        self.conn = pgtest.connect()
 
     def tearDown(self):
         self.conn.close()
@@ -82,19 +83,9 @@ class RestoreTests(unittest.TestCase):
         self.conn.execute("UPDATE jobs SET formatted=? WHERE id=?", (formatted, job_id))
         self.conn.commit()
 
-    def test_new_postings_are_marked_formatted_and_old_rows_are_not(self):
+    def test_new_postings_are_marked_formatted(self):
         db.add_job(self.conn, sources.Job("gh:a:1", "greenhouse", "A", "Dev", "x", "https://x", description="d"), 1.0)
         self.assertEqual(self.conn.execute("SELECT formatted FROM jobs").fetchone()[0], 1)
-        old = sqlite3.connect(str(Path(self.tmp.name) / "old.db"))
-        old.execute("CREATE TABLE jobs (id TEXT PRIMARY KEY, source TEXT, company TEXT, title TEXT, location TEXT, url TEXT, posted TEXT,"
-                    " pay_min INTEGER, pay_max INTEGER, description TEXT, quick_score REAL, score INTEGER, verdict TEXT, analysis TEXT,"
-                    " status TEXT DEFAULT 'new', first_seen REAL, notes TEXT)")
-        old.execute("INSERT INTO jobs (id, description) VALUES ('gh:b:2', 'plain')")
-        old.commit()
-        old.close()
-        conn = db.connect(str(Path(self.tmp.name) / "old.db"))
-        self.assertEqual(conn.execute("SELECT formatted FROM jobs").fetchone()[0], 0)
-        conn.close()
 
     def test_an_old_posting_gets_its_formatting_back_from_its_board(self):
         self.add("gh:acme:9", 0)

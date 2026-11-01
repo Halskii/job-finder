@@ -1,5 +1,5 @@
 """Interview prep for a job: how the interview usually runs for this role and company, which topics to study, and what to ask.
-One streamed Claude call that can search the web for what candidates report. The answer is Markdown, saved in jobs.db so
+One streamed Claude call that can search the web for what candidates report. The answer is Markdown, saved in the database so
 opening it again is free."""
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from datetime import date
 
 import db
 import tailor
+import userdata
 from errors import BadModelAnswer, UserError
 
 MODEL = "claude-haiku-5-5"   # overridden by `tips_model:` in config.yaml
@@ -90,7 +91,7 @@ def build_prompt(profile: dict, row, rounds: list) -> str:
     return user
 
 
-def stream_tips(conn, job_id: str, refresh: bool = False, client=None):
+def stream_tips(conn, job_id: str, refresh: bool = False, client=None, home=None):
     """Yield events for the page while the answer is written, and save the answer at the end:
     {"type": "start", "disclaimer"}, {"type": "status", "text"}, {"type": "text", "text"} (a piece of the answer),
     {"type": "reset"} (the model searched again, so drop what was shown), {"type": "done", "result"}.
@@ -103,7 +104,7 @@ def stream_tips(conn, job_id: str, refresh: bool = False, client=None):
     if saved:
         yield {"type": "done", "result": saved}
         return
-    profile = tailor.load_profile()
+    profile = tailor.load_profile(home or userdata.home(conn.user_id))
     client = client or tailor.make_client()
     model = tailor.config_value("tips_model", MODEL)
     search = bool(tailor.config_value("tips_web_search", True))

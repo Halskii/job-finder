@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 import db
+from tests import pgtest
 import sources
 import tailor
 import tips
@@ -19,7 +20,7 @@ class Base(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
         (self.root / "profile.json").write_text(json.dumps({"name": "James Hall", "strong_skills": ["Java"]}), encoding="utf-8")
-        self.conn = db.connect(str(self.root / "jobs.db"))
+        self.conn = pgtest.connect()
         db.add_job(self.conn, sources.Job("gh:acme:1", "greenhouse", "Acme", "Software Engineer II", "Austin, TX",
                                           "https://example.com/1", description="Build services in Java."), 1.0)
 
@@ -41,19 +42,6 @@ class RoundTests(Base):
         self.assertEqual(len(db.rounds_for(self.conn, "gh:acme:1")), 1)
         self.assertEqual(db.delete_round(self.conn, 999), 0)
 
-    def test_an_older_database_gets_the_new_tables(self):
-        import sqlite3
-        c = sqlite3.connect(str(self.root / "old.db"))
-        c.execute("CREATE TABLE jobs (id TEXT PRIMARY KEY, source TEXT, company TEXT, title TEXT, location TEXT, url TEXT,"
-                  " posted TEXT, pay_min INTEGER, pay_max INTEGER, description TEXT, quick_score REAL, score INTEGER,"
-                  " verdict TEXT, analysis TEXT, status TEXT DEFAULT 'new', first_seen REAL, notes TEXT)")
-        c.commit()
-        c.close()
-        conn = db.connect(str(self.root / "old.db"))
-        self.assertEqual(db.rounds_for(conn, "x"), [])
-        self.assertIsNone(db.get_tips(conn, "x"))
-        self.assertEqual(db.jobs_with_tips(conn), [])
-        conn.close()
 
 
 # ---- a fake streaming client: each turn is (events, stop_reason, web searches run)
@@ -114,8 +102,7 @@ ONE_SEARCH = (text(0, "Let me search {for} it.") + search(1, "acme interview", [
 
 class TipsTests(Base):
     def run_tips(self, client, **kw):
-        with mock.patch.object(tailor, "ROOT", self.root):
-            return list(tips.stream_tips(self.conn, "gh:acme:1", client=client, **kw))
+        return list(tips.stream_tips(self.conn, "gh:acme:1", client=client, home=self.root, **kw))
 
     def test_the_answer_streams_after_the_search_and_is_saved(self):
         client, calls = scripted(ONE_SEARCH)
@@ -168,7 +155,8 @@ class TipsTests(Base):
     def test_with_search_turned_off_everything_streams_and_no_tool_is_sent(self):
         (self.root / "config.yaml").write_text("tips_web_search: false\n", encoding="utf-8")
         client, calls = scripted((text(0, ANSWER), "end_turn", 0))
-        events = self.run_tips(client)
+        with mock.patch.object(tailor, "ROOT", self.root):   # where the service-wide config.yaml is read from
+            events = self.run_tips(client)
         self.assertNotIn("tools", calls[0])
         self.assertEqual("".join(e["text"] for e in events if e["type"] == "text"), ANSWER)
 
@@ -188,8 +176,7 @@ class TipsTests(Base):
                 self.run_tips(client)
         self.assertIsNone(db.get_tips(self.conn, "gh:acme:1"))
         with self.assertRaises(LookupError):
-            with mock.patch.object(tailor, "ROOT", self.root):
-                list(tips.stream_tips(self.conn, "nope", client=scripted()[0]))
+            list(tips.stream_tips(self.conn, "nope", client=scripted()[0], home=self.root))
 
     def test_an_answer_saved_by_the_first_version_still_displays(self):
         old = {"basis": "company", "summary": "Old summary.", "stages": [{"name": "Phone", "format": "30 min.", "what_to_expect": "Logistics.", "confidence": "reported"}],
