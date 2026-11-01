@@ -1,8 +1,8 @@
-"""Tailor your resume to one stored job and write a cover letter for it, both saved as PDFs in 'Optimized Resumes/'.
+"""Tailor your resume to one stored job and write a cover letter for it, both saved as PDFs (and as editable Word files) in 'Optimized Resumes/'.
 
 One Claude call returns the rewritten resume and the letter as JSON; this module checks it, lays it out as HTML, and
-prints the HTML to PDF with headless Edge or Chrome. Your phone number and email are never sent to the API: the
-contact line on the PDF is copied from the top of your own resume file."""
+prints the HTML to PDF with headless Edge or Chrome, then writes the same content as .docx with python-docx. Your phone
+number and email are never sent to the API: the contact line is copied from the top of your own resume file."""
 from __future__ import annotations
 
 import html
@@ -37,6 +37,12 @@ SYSTEM = """You tailor one candidate's resume to one job posting and write a cov
 - Put certifications in the skills list as a labeled line.
 - Write plain, direct sentences with no buzzwords. Keep tense consistent: the summary in present tense, bullets about a
   past job in past tense.
+- Grammar comes first, above style, in the resume and above all in the letter. Every sentence must be complete and correct,
+  with one main idea and subject-verb agreement. Never string items together with repeated "and" or commas (no "I did X and Y
+  and Z, and A, and B"). A list of any length is fine when it is punctuated properly: commas between the items and a single
+  "and" before the last one ("X, Y, Z, A, and B"). Use "and" once per list, never between clauses that already have a comma. Avoid run-on
+  sentences, comma splices, and sentences longer than about 30 words. Before answering, reread each sentence of the letter
+  and fix any that read as a chain of additions.
 - Keep a steady, professional tone about the whole role. Do not sound especially passionate, excited, or devoted about one
   component of the job description (for example "authentication is what I know best" or "I love building X"), and do not
   single one requirement out for emphasis. Show fit through specifics. Only do this if the candidate's own request asks for it.
@@ -202,6 +208,127 @@ def letter_html(name: str, contact: str, company: str, role: str, paragraphs: li
             f"<h1>{e(name)}</h1><div class='contact'>{e(contact)}</div>" + "".join(body) + "</body></html>")
 
 
+# ------------------------------------------------------------ Word
+
+def _word():
+    """The python-docx pieces, imported on first use."""
+    try:
+        import docx
+        from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_TAB_ALIGNMENT
+        from docx.oxml import OxmlElement
+        from docx.oxml.ns import qn
+        from docx.shared import Inches, Pt
+    except ImportError:
+        raise UserError("A package the Word files need (python-docx) is not installed for the Python running the viewer. "
+                        "Start the viewer with the project's virtual environment (.venv), or install requirements.txt.", "missing_package") from None
+    return docx, WD_ALIGN_PARAGRAPH, WD_TAB_ALIGNMENT, OxmlElement, qn, Inches, Pt
+
+
+def _word_page(margin_v: float, margin_h: float, pt: float):
+    """A blank Letter-size Word document in Calibri with no extra spacing between paragraphs."""
+    docx, _, _, _, _, Inches, Pt = _word()
+    doc = docx.Document()
+    sec = doc.sections[0]
+    sec.page_width, sec.page_height = Inches(8.5), Inches(11)
+    sec.top_margin = sec.bottom_margin = Inches(margin_v)
+    sec.left_margin = sec.right_margin = Inches(margin_h)
+    normal = doc.styles["Normal"]
+    normal.font.name, normal.font.size = "Calibri", Pt(pt)
+    normal.paragraph_format.space_before = normal.paragraph_format.space_after = Pt(0)
+    return doc
+
+
+def _word_para(doc, text: str = "", *, size: float | None = None, bold: bool = False, center: bool = False, rule: bool = False,
+               before: float = 0, after: float = 0, style: str | None = None):
+    """One paragraph. `rule` draws a thin line under it (added first so the XML stays in the order Word expects)."""
+    _, ALIGN, _, OxmlElement, qn, _, Pt = _word()
+    p = doc.add_paragraph(style=style)
+    if rule:
+        border, line = OxmlElement("w:pBdr"), OxmlElement("w:bottom")
+        for key, value in (("w:val", "single"), ("w:sz", "6"), ("w:space", "1"), ("w:color", "000000")):
+            line.set(qn(key), value)
+        border.append(line)
+        p._p.get_or_add_pPr().append(border)
+    p.paragraph_format.space_before, p.paragraph_format.space_after = Pt(before), Pt(after)
+    if center:
+        p.alignment = ALIGN.CENTER
+    if text:
+        _word_run(p, text, size, bold)
+    return p
+
+
+def _word_run(p, text: str, size: float | None = None, bold: bool = False):
+    _, _, _, _, _, _, Pt = _word()
+    run = p.add_run(text)
+    run.bold = bold
+    if size:
+        run.font.size = Pt(size)
+    return run
+
+
+def resume_docx(name: str, contact: str, r: dict, out: Path, pt: float = 10.5) -> None:
+    """The same resume as resume_html, as an editable Word file."""
+    _, _, TAB, _, _, Inches, _ = _word()
+    doc = _word_page(0.45, 0.65, pt)
+
+    def heading(text):
+        _word_para(doc, text, size=10.5, bold=True, rule=True, before=7, after=3)
+
+    def row(left, right):
+        p = _word_para(doc, after=2)
+        p.paragraph_format.tab_stops.add_tab_stop(Inches(7.2), TAB.RIGHT)
+        _word_run(p, left, bold=True)
+        _word_run(p, "\t" + right, bold=False)
+
+    _word_para(doc, name, size=21, bold=True, center=True, after=2)
+    _word_para(doc, contact, size=10, center=True, after=7)
+    heading("SUMMARY")
+    _word_para(doc, r["summary"], after=2)
+    heading("TECHNICAL SKILLS")
+    for s in r["skills"]:
+        p = _word_para(doc, after=2)
+        _word_run(p, f"{s['label']}:", bold=True)
+        _word_run(p, f" {s['text']}")
+    heading("EXPERIENCE")
+    for j in r["jobs"]:
+        row(j["heading"], j.get("dates", ""))
+        for b in j["bullets"]:
+            _word_para(doc, b, style="List Bullet", after=2.5)
+    heading("EDUCATION")
+    ed = r["education"]
+    row(ed["heading"], ed.get("dates", ""))
+    if ed.get("detail"):
+        _word_para(doc, ed["detail"], after=2)
+    if (r.get("interests") or "").strip():
+        heading("INTERESTS")
+        _word_para(doc, r["interests"], after=2)
+    _save_word(doc, out)
+
+
+def letter_docx(name: str, contact: str, company: str, role: str, paragraphs: list[str], out: Path, pt: float = 11) -> None:
+    """The same cover letter as letter_html, as an editable Word file."""
+    doc = _word_page(0.9, 1.0, pt)
+    today = date.today()
+    _word_para(doc, name, size=21, bold=True, center=True, after=2)
+    _word_para(doc, contact, size=10, center=True, rule=True, after=16)
+    _word_para(doc, f"{today:%B} {today.day}, {today.year}", after=10)
+    _word_para(doc, f"{company} Hiring Team")
+    _word_para(doc, f"Re: {role}", after=10)
+    _word_para(doc, f"Dear {company} Hiring Team,", after=10)
+    for text in paragraphs:
+        _word_para(doc, text, after=10)
+    _word_para(doc, "Sincerely,", after=22)
+    _word_para(doc, name)
+    _save_word(doc, out)
+
+
+def _save_word(doc, out: Path) -> None:
+    try:
+        doc.save(str(out))
+    except PermissionError:
+        raise UserError(f"Could not replace {out.name} because it is open in another program. Close it and try again.", "file_in_use") from None
+
+
 # ------------------------------------------------------------ PDF
 
 def find_browser() -> str:
@@ -255,8 +382,8 @@ def write_one_page(make_page, sizes, out: Path) -> int:
 # ------------------------------------------------------------ the whole job
 
 def tailor_job(conn, job_id: str, out_dir: Path = OUT_DIR, client=None, resume_request: str = "", letter_request: str = "") -> dict:
-    """Write <Name>_<Role>_<Company>_resume.pdf and ..._cover_letter.pdf for a stored job.
-    Returns {"files": [...], "folder": str, "pages": {...}, "tokens": {"in": n, "out": n}}."""
+    """Write <Name>_<Role>_<Company>_resume.pdf and ..._cover_letter.pdf for a stored job, plus the same two as editable .docx files.
+    Returns {"files": [pdfs], "word_files": [docx], "folder": str, "pages": {...}, "tokens": {"in": n, "out": n}}."""
     import main   # imported here so the viewer only loads it when this button is used
     row = conn.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
     if row is None:
@@ -279,5 +406,8 @@ def tailor_job(conn, job_id: str, out_dir: Path = OUT_DIR, client=None, resume_r
     r_pages = write_one_page(lambda s: resume_html(name, contact, data["resume"], s), RESUME_SIZES, resume_pdf)
     l_pages = write_one_page(lambda s: letter_html(name, contact, company, row["title"], data["cover_letter"]["paragraphs"], s),
                              LETTER_SIZES, letter_pdf)
-    return {"files": [resume_pdf.name, letter_pdf.name], "folder": str(out_dir),
+    resume_doc, letter_doc = out_dir / f"{stem}_resume.docx", out_dir / f"{stem}_cover_letter.docx"
+    resume_docx(name, contact, data["resume"], resume_doc)
+    letter_docx(name, contact, company, row["title"], data["cover_letter"]["paragraphs"], letter_doc)
+    return {"files": [resume_pdf.name, letter_pdf.name], "word_files": [resume_doc.name, letter_doc.name], "folder": str(out_dir),
             "pages": {"resume": r_pages, "cover_letter": l_pages}, "tokens": {"in": tok_in, "out": tok_out}}

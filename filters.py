@@ -111,12 +111,14 @@ def exclusion_ok(location: str, patterns: list[re.Pattern]) -> bool:
     return any(not any(p.search(part) for p in patterns) for part in parts)
 
 
-def pay_ok(pay_max: int | None, pay_min: int | None, minimum: int) -> bool:
-    """True when the listed pay reaches the minimum. A posting with no pay listed always passes."""
+def pay_ok(pay_max: float | None, pay_min: float | None, minimum: int, unit: str = "year") -> bool:
+    """True when the listed pay reaches the yearly minimum. An hourly rate is compared as a full-time year (2,080 hours).
+    A posting with no pay listed always passes."""
+    scale = 2080 if unit == "hour" else 1
     if pay_max is not None:
-        return pay_max >= minimum
+        return pay_max * scale >= minimum
     if pay_min is not None:
-        return pay_min >= minimum * 0.6   # a lone low number is ambiguous (hourly?), so don't over-filter
+        return pay_min * scale >= minimum * 0.6   # a lone low number is ambiguous, so don't over-filter
     return True
 
 

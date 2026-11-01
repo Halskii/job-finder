@@ -18,6 +18,7 @@ from urllib.parse import unquote, urlparse
 
 import db
 import reformat
+import sources
 import tailor
 import tips
 from errors import STATUS, explain
@@ -97,6 +98,7 @@ def load_report(name: str) -> dict | None:
                 j["description"] = row["description"] or ""
                 j["status"], j["notes"], j["applied_at"] = row["status"] or "new", row["notes"] or "", row["applied_at"]
                 j["can_reformat"] = reformat.can_reformat(row["id"], row["formatted"])
+                j["pay"] = sources.pay_label(row["pay_min"], row["pay_max"], row["pay_unit"])   # the stored pay, which may be newer than the report
             else:
                 j["description"], j["status"], j["notes"], j["applied_at"], j["can_reformat"] = "", "new", "", None, False
             j["title"], j["company"] = title, company
@@ -109,7 +111,7 @@ def load_report(name: str) -> dict | None:
 def job_dict(r) -> dict:
     """A stored job in the same shape load_report gives, so the page can show it like any report entry."""
     a = json.loads(r["analysis"] or "{}")
-    pay = f"{r['pay_min'] or '?'} - {r['pay_max'] or '?'}" if r["pay_min"] or r["pay_max"] else "n/a - n/a"
+    pay = sources.pay_label(r["pay_min"], r["pay_max"], r["pay_unit"])
     return {
         "id": r["id"], "score": r["score"] or 0, "title": r["title"], "company": r["company"],
         "location": r["location"] or "", "pay": pay, "posted": r["posted"] or "unknown",
@@ -747,7 +749,7 @@ function route(){
   }
   if(j)lastJob=id;
   if(!j){$("#main").replaceChildren(el("div",{className:"empty",textContent:jobs.length?"Select a job from the list.":"No jobs in this report."}));return}
-  const meta=[j.location,j.pay&&j.pay!=="n/a - n/a"?j.pay:"",j.posted&&"Posted "+j.posted].filter(Boolean).join("  ·  ");
+  const meta=[j.location,/^(n\/a( - n\/a)?|\?( - \?)?)?$/.test((j.pay||"").trim())?"Salary Non-Disclosed":j.pay,j.posted&&"Posted "+j.posted].filter(Boolean).join("  ·  ");
   const buttons=el("div",{className:"row"});
   if(j.url)buttons.append(el("a",{className:"btn primary",href:j.url,target:"_blank",rel:"noopener noreferrer",textContent:"Open original posting"}));
   const tracked=APPLIED.includes(j.status)&&j.applied_at;
@@ -758,7 +760,7 @@ function route(){
     buttons.append(el("button",{className:"btn apply",textContent:"Mark as applied",title:"Adds this job to the tracker with today's date",onclick:()=>setStatus(j,"applied",true)}));
   }
   const note=el("div",{className:"muted",id:"tailor-note",style:"margin:-4px 0 8px"});
-  const tailorBtn=el("button",{className:"btn",id:"tailor-btn",textContent:TAILOR_LABEL,title:"Uses Claude (Fable 5.1) to rewrite your resume for this posting and write a cover letter, saved as PDFs in the Optimized Resumes folder. Costs a few cents to under a dollar.",onclick:()=>askTailor(j)});
+  const tailorBtn=el("button",{className:"btn",id:"tailor-btn",textContent:TAILOR_LABEL,title:"Uses Claude (Fable 5.1) to rewrite your resume for this posting and write a cover letter, saved as PDFs and editable Word files in the Optimized Resumes folder. Costs a few cents to under a dollar.",onclick:()=>askTailor(j)});
   buttons.append(tailorBtn);
   buttons.append(el("button",{className:"btn",textContent:"Interview prep",
     title:"How the interview for this role and company usually runs, what to study, and what to ask. Uses Claude once (about 3 cents); the answer is saved in your Interview Prep list, so opening it again is free.",
@@ -834,7 +836,7 @@ async function tailorJob(j,resume_request,letter_request){
   try{
     const d=await post("/api/tailor",{id:j.id,resume_request,letter_request});
     const long=Object.entries(d.pages).filter(([k,n])=>n>1).map(([k])=>k.replace("_"," "));
-    message="Saved to Optimized Resumes: "+d.files.join(", ")+(long.length?" (the "+long.join(" and ")+" runs past one page; trim it before sending)":"");
+    message="Saved to Optimized Resumes: "+d.files.join(", ")+" (each also saved as an editable Word file)"+(long.length?" (the "+long.join(" and ")+" runs past one page; trim it before sending)":"");
   }catch(e){fail("Couldn't write your resume and cover letter",e);message="That didn't finish. "+friendly(e)}
   tailorState[j.id]={running:false,message};paintTailor(j.id);
 }
@@ -1049,15 +1051,32 @@ loadReports().catch(e=>{console.error(e);$("#main").replaceChildren(el("div",{cl
 """
 
 
+def restore_in_background(delay: float) -> None:
+    """Give every posting stored as plain text its formatting back, a little at a time while the viewer runs, best matches first,
+    so that opening one finds it already done. Failures are logged and retried the next time the viewer starts."""
+    conn = db.connect(str(DB_PATH))
+    try:
+        counts = reformat.restore_all(conn, delay=delay)
+        if counts["restored"] or counts["failed"]:
+            logging.getLogger("job-finder").info("Restored formatting for %(restored)d postings (%(gone)d no longer online, %(failed)d to retry)", counts)
+    except Exception:
+        logging.getLogger("job-finder").exception("Restoring posting formatting stopped early")
+    finally:
+        conn.close()
+
+
 def main() -> None:
     """Start the viewer on this computer only (127.0.0.1), so nothing else on the network can reach it."""
     logging.basicConfig(level=logging.WARNING, format="%(asctime)s %(levelname)s %(message)s")   # unexpected errors, with details, go to this window
     ap = argparse.ArgumentParser(description="Browse job reports in your browser.")
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--no-open", action="store_true", help="don't open a browser tab")
+    ap.add_argument("--no-restore", action="store_true", help="don't restore the formatting of older postings in the background")
     args = ap.parse_args()
     if not DB_PATH.exists():
         sys.exit("jobs.db not found. Run: python main.py run")
+    if not args.no_restore:
+        threading.Thread(target=restore_in_background, args=(0.4,), daemon=True).start()
     srv = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
     url = f"http://127.0.0.1:{args.port}/"
     print(f"Serving {url}  (Ctrl+C to stop)")

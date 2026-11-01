@@ -117,7 +117,7 @@ def fill_rippling_detail(job: Job) -> None:
     d = _get(f"https://ats.rippling.com/api/v2/board/{job.detail['slug']}/jobs/{job.detail['id']}")
     desc = d.get("description")
     if isinstance(desc, dict):   # some boards return several named sections
-        desc = " ".join(str(v) for v in desc.values())
+        desc = "<br><br>".join(str(v) for v in desc.values())
     job.description = strip_html(desc or "")
     job.posted = _day(d.get("createdOn")) or job.posted
     places = [w if isinstance(w, str) else (w or {}).get("name", "") for w in d.get("workLocations") or []]
@@ -132,7 +132,7 @@ def fetch_gem(slug: str) -> list[Job]:
     data = _get(f"https://api.gem.com/job_board/v0/{slug}/job_posts/")
     jobs = []
     for j in data if isinstance(data, list) else []:
-        desc = j.get("content_plain") or strip_html(j.get("content", ""))
+        desc = strip_html(j.get("content", "")) or j.get("content_plain") or ""   # the HTML keeps the headings and bullets
         lo, hi = extract_pay(desc)
         place = (j.get("location") or {}).get("name", "")
         if j.get("location_type") == "remote" and "remote" not in place.lower():

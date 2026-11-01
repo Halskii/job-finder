@@ -119,6 +119,23 @@ class TailorJobTests(unittest.TestCase):
         self.assertIn("jh@example.com", pages[result["files"][0]])        # contact line copied from the resume file
         self.assertIn("Dear CoreWeave Hiring Team,", pages[result["files"][1]])
 
+    def test_editable_word_copies_hold_the_same_text(self):
+        import docx
+        client, _ = fake_client()
+        result = self.run_job(client)
+        self.assertEqual(result["word_files"], ["James_Hall_Software_and_AI_Engineer_CoreWeave_resume.docx",
+                                                "James_Hall_Software_and_AI_Engineer_CoreWeave_cover_letter.docx"])
+        folder = self.root / "Optimized Resumes"
+        resume = [p.text for p in docx.Document(str(folder / result["word_files"][0])).paragraphs]
+        letter = [p.text for p in docx.Document(str(folder / result["word_files"][1])).paragraphs]
+        self.assertEqual(resume[0], "James Hall")
+        self.assertIn("jh@example.com", resume[1])
+        self.assertIn("SUMMARY", resume)
+        self.assertIn("Dear CoreWeave Hiring Team,", letter)
+        self.assertEqual(letter[-1], "James Hall")
+        for text in ANSWER["cover_letter"]["paragraphs"]:
+            self.assertIn(text, letter)
+
     def test_company_name_comes_from_the_posting_when_the_model_gives_it(self):
         client, _ = fake_client({**ANSWER, "company_name": "CoreWeave"})
         result = self.run_job(client)

@@ -43,10 +43,21 @@ def _migrate(conn) -> None:
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(jobs)")}
     if "dedupe_key" not in cols:
         conn.execute("ALTER TABLE jobs ADD COLUMN dedupe_key TEXT")
-    if "formatted" not in cols:   # 1 when the description keeps the posting's headings and bullets; old rows are plain text
+    if "pay_unit" not in cols:   # 'year' (pay_min / pay_max are yearly) or 'hour' (dollars per hour)
+        conn.execute("ALTER TABLE jobs ADD COLUMN pay_unit TEXT DEFAULT 'year'")
+    if "formatted" not in cols:   # 1 when the description keeps the posting's headings and bullets; 0 for old plain text; 2 when its source no longer has it
         conn.execute("ALTER TABLE jobs ADD COLUMN formatted INTEGER DEFAULT 0")
     if "applied_at" not in cols:   # the day you applied, as YYYY-MM-DD; NULL means not applied
         conn.execute("ALTER TABLE jobs ADD COLUMN applied_at TEXT")
+    if get_meta(conn, "hourly_backfill") is None:   # once: postings stored before hourly rates were read
+        import sources
+        for r in conn.execute("SELECT id, description FROM jobs WHERE pay_min IS NULL AND pay_max IS NULL AND "
+                              "(description LIKE '%/hr%' OR description LIKE '%hour%')").fetchall():
+            lo, hi = sources.extract_hourly(r["description"])
+            if lo is not None:
+                conn.execute("UPDATE jobs SET pay_min=?, pay_max=?, pay_unit='hour' WHERE id=?", (lo, hi, r["id"]))
+        conn.commit()
+        set_meta(conn, "hourly_backfill", "done")
     for r in conn.execute("SELECT id, company, title FROM jobs WHERE dedupe_key IS NULL").fetchall():
         conn.execute("UPDATE jobs SET dedupe_key=? WHERE id=?", (dedupe_key(r["company"], r["title"]), r["id"]))
     conn.commit()
@@ -74,9 +85,9 @@ def add_job(conn, job, quick: float) -> bool:
     """Store a posting. False when its id is already there, so a job seen on an earlier run is never added twice."""
     cur = conn.execute(
         "INSERT OR IGNORE INTO jobs (id, source, company, title, location, url, posted, pay_min, pay_max,"
-        " description, quick_score, first_seen, dedupe_key, formatted) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,1)",
+        " description, quick_score, first_seen, dedupe_key, formatted, pay_unit) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,1,?)",
         (job.id, job.source, job.company, job.title, job.location, job.url, job.posted,
-         job.pay_min, job.pay_max, job.description, quick, time.time(), dedupe_key(job.company, job.title)),
+         job.pay_min, job.pay_max, job.description, quick, time.time(), dedupe_key(job.company, job.title), job.pay_unit),
     )
     conn.commit()
     return cur.rowcount == 1
