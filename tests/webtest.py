@@ -40,6 +40,7 @@ class Site:
             conn.close()
         self.uid = self.user["id"]
         self.home = userdata.home(self.uid)
+        userdata.save_settings(self.uid, {**userdata.SETTINGS_DEFAULTS, "titles": ["Software Engineer"]})   # already set up: `/` is the app, not the profile page
         config = uvicorn.Config(web.app, host="127.0.0.1", port=0, log_level="error")
         self.server = uvicorn.Server(config)
         self.thread = threading.Thread(target=self.server.run, daemon=True)

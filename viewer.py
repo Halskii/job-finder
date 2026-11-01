@@ -889,6 +889,7 @@ setTheme(document.documentElement.dataset.theme==="light"?"light":"dark",false);
 api("/api/me").then(me=>{
   const box=$("#account");
   box.replaceChildren(el("span",{className:"who",textContent:me.name||me.email,title:me.email}),
+    el("a",{className:"btn",href:"/profile",textContent:"Profile",title:"Your resume, job titles and search limits"}),
     el("button",{className:"btn",textContent:"Sign out",onclick:async()=>{try{await post("/auth/logout",{})}catch(e){}location.href="/login"}}));
   box.hidden=false;
 }).catch(()=>{});

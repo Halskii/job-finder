@@ -23,6 +23,8 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 import auth
 import db
 import loginpage
+import onboarding
+import profilepage
 import reformat
 import tailor
 import tips
@@ -33,6 +35,7 @@ from errors import STATUS, UserError, explain
 log = logging.getLogger("job-finder")
 COOKIE = "session"
 MAX_BODY = 40_000          # room for two 2,000-character requests, even all non-ASCII
+MAX_UPLOAD = userdata.MAX_RESUME_BYTES
 RESTORE = True             # restore the formatting of older postings in the background (python web.py --no-restore turns it off)
 FILE_NAME = re.compile(r"^[A-Za-z0-9_.\-]{1,200}\.(pdf|docx)$")
 MEDIA = {".pdf": "application/pdf", ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"}
@@ -55,6 +58,12 @@ def problem_response(status: int, message: str, code: str) -> JSONResponse:
 @app.exception_handler(Problem)
 async def _problem(request: Request, ex: Problem):
     return problem_response(ex.status, ex.message, ex.code)
+
+
+@app.exception_handler(UserError)
+async def _user_error(request: Request, ex: UserError):
+    """An error written for the person (a resume that is too short, a missing key): answered, and not logged as a crash."""
+    return problem_response(STATUS.get(ex.code, 422), ex.message, ex.code)
 
 
 @app.exception_handler(StarletteHTTPException)
@@ -110,14 +119,16 @@ async def guard(request: Request, call_next):
     host = host_of(request)
     if host not in allowed_hosts():
         return problem_response(403, "This page cannot be opened at this address.", "bad_host")
-    if request.method == "POST":
+    if request.method in ("POST", "PUT"):
         origin = request.headers.get("origin")
         if origin and urlparse(origin).netloc.lower() != (request.headers.get("host") or "").lower():
             return problem_response(403, "That request came from another site, so it was not done.", "bad_origin")
-        # Requiring JSON means a page on another origin cannot send this without a CORS preflight, which is never granted.
-        if "application/json" not in (request.headers.get("content-type") or ""):
+        # Requiring JSON (or, for the resume upload, a PDF) means a page on another origin cannot send this without a CORS
+        # preflight, which is never granted.
+        wanted = "application/pdf" if request.method == "PUT" else "application/json"
+        if wanted not in (request.headers.get("content-type") or ""):
             return problem_response(400, "That request was not understood. Reload the page and try again.", "bad_request")
-        if int(request.headers.get("content-length") or 0) > MAX_BODY:
+        if int(request.headers.get("content-length") or 0) > (MAX_UPLOAD if request.method == "PUT" else MAX_BODY):
             return problem_response(413, "That request was too large.", "too_large")
     response = await call_next(request)
     for k, v in SECURITY.items():
@@ -138,6 +149,15 @@ async def json_body(request: Request) -> dict:
     if not isinstance(body, dict):
         raise Problem(400, "That request was not understood. Reload the page and try again.", "bad_request")
     return body
+
+
+async def pdf_body(request: Request) -> bytes:
+    raw = b""
+    async for chunk in request.stream():
+        raw += chunk
+        if len(raw) > MAX_UPLOAD:
+            raise Problem(413, "That file is too large. A resume PDF can be at most 5 MB.", "too_large")
+    return raw
 
 
 def bad_request() -> Problem:
@@ -264,9 +284,73 @@ def start_restore(uid: int) -> None:
 
 @app.get("/")
 def index(request: Request):
+    user = session_user(request)
+    if user is None:
+        return RedirectResponse("/login", status_code=303)
+    if not userdata.is_set_up(user["id"]):   # a new account starts by saying what jobs it wants
+        return RedirectResponse("/profile", status_code=303)
+    return HTMLResponse(viewer.PAGE)
+
+
+@app.get("/profile")
+def profile_page(request: Request):
     if session_user(request) is None:
         return RedirectResponse("/login", status_code=303)
-    return HTMLResponse(viewer.PAGE)
+    return HTMLResponse(profilepage.PAGE)
+
+
+@app.get("/api/profile")
+def get_profile(user: dict = Depends(current_user)):
+    uid = user["id"]
+    return {"account": user, "set_up": userdata.is_set_up(uid), "resume": {"kind": userdata.resume_kind(uid)},
+            "settings": userdata.load_settings(uid), "profile": userdata.load_profile(uid)}
+
+
+@app.put("/api/resume")
+def upload_resume(data: bytes = Depends(pdf_body), user: dict = Depends(current_user)):
+    return userdata.save_resume_pdf(user["id"], data)
+
+
+@app.post("/api/resume-text")
+def resume_text(body: dict = Depends(json_body), user: dict = Depends(current_user)):
+    return {"chars": userdata.save_resume_text(user["id"], body.get("text"))}
+
+
+@app.post("/api/profile/analyze")
+def analyze_resume(user: dict = Depends(current_user)):
+    """Read the saved resume with Claude: suggested job titles and the facts it states. Nothing is saved until the person presses Save."""
+    import main
+    uid = user["id"]
+    text = main.load_resume(userdata.home(uid))   # contact details are removed before anything goes to the API
+    if not text:
+        raise Problem(400, "Add your resume first, then we can read it.", "no_resume")
+    lock = user_lock("analyze", uid)
+    if not lock.acquire(blocking=False):
+        raise Problem(409, "Already reading your resume. Wait for it to finish.", "busy")
+    try:
+        return onboarding.analyze(tailor.make_client(), text)
+    finally:
+        lock.release()
+
+
+@app.post("/api/profile/save")
+def save_profile(body: dict = Depends(json_body), user: dict = Depends(current_user)):
+    uid = user["id"]
+    settings = onboarding.clean_settings(body.get("settings"))
+    profile, notes = onboarding.clean_profile(body.get("profile"))
+    if not settings["titles"]:
+        raise Problem(400, "Add at least one job title to search for.", "invalid")
+    userdata.save_settings(uid, settings)
+    userdata.save_profile(uid, profile)
+    return {"settings": settings, "profile": profile, "notes": notes}
+
+
+@app.post("/api/profile/skip")
+def skip_profile(user: dict = Depends(current_user)):
+    """Go to the app without a profile for now (the profile page asks again from the Profile button)."""
+    if not userdata.is_set_up(user["id"]):
+        userdata.save_settings(user["id"], userdata.load_settings(user["id"]))
+    return {"ok": True}
 
 
 @app.get("/api/me")
