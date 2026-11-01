@@ -2,13 +2,14 @@
 and the Remotive request throttle. No network."""
 import argparse
 import shutil
-import sqlite3
+
 import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
 
 import db
+from tests import pgtest
 import discovery
 import main
 import sources
@@ -197,7 +198,7 @@ class RemotiveTests(unittest.TestCase):
 class DedupeTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.conn = db.connect(str(Path(self.tmp.name) / "jobs.db"))
+        self.conn = pgtest.connect()
 
     def tearDown(self):
         self.conn.close()
@@ -216,22 +217,6 @@ class DedupeTests(unittest.TestCase):
         self.assertFalse(db.is_cross_source_duplicate(self.conn, job("rm:1", "remotive", "Acme", "Software Engineer")))
         self.assertFalse(db.is_cross_source_duplicate(self.conn, job("rm:2", "remotive", "Stripe", "Platform Engineer")))
 
-    def test_old_database_without_the_column_is_migrated_and_backfilled(self):
-        path = Path(self.tmp.name) / "old.db"
-        old = sqlite3.connect(path)
-        old.execute("CREATE TABLE jobs (id TEXT PRIMARY KEY, source TEXT, company TEXT, title TEXT, location TEXT, url TEXT,"
-                    " posted TEXT, pay_min INTEGER, pay_max INTEGER, description TEXT, quick_score REAL, score INTEGER,"
-                    " verdict TEXT, analysis TEXT, status TEXT DEFAULT 'new', first_seen REAL, notes TEXT)")
-        old.execute("INSERT INTO jobs (id, source, company, title) VALUES ('gh:a:1', 'greenhouse', 'Acme', 'Platform Engineer')")
-        old.commit()
-        old.close()
-        conn = db.connect(str(path))
-        try:
-            self.assertTrue(db.is_cross_source_duplicate(conn, job("rm:1", "remotive", "acme", "Platform Engineer")))
-            self.assertEqual(conn.execute("SELECT count(*) FROM jobs").fetchone()[0], 1)   # nothing lost
-        finally:
-            conn.close()
-
     def test_meta_roundtrip(self):
         self.assertIsNone(db.get_meta(self.conn, "k"))
         db.set_meta(self.conn, "k", "1")
@@ -242,7 +227,7 @@ class DedupeTests(unittest.TestCase):
 class FeedThrottleTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.conn = db.connect(str(Path(self.tmp.name) / "jobs.db"))
+        self.conn = pgtest.connect()
         self.cfg = {"feeds": {"remotive": {"enabled": True, "min_hours": 6, "categories": ["devops"]}}}
 
     def tearDown(self):

@@ -97,9 +97,9 @@ def _is_gone(ex: Exception, prefix: str = "") -> bool:
 def _store(conn, job_id: str, description: str | None) -> None:
     """Keep the formatted description, or remember that the source no longer has this posting (formatted = 2)."""
     if description:
-        conn.execute("UPDATE jobs SET description=?, formatted=1 WHERE id=?", (description, job_id))
+        conn.execute("UPDATE postings SET description=?, formatted=1 WHERE id=?", (description, job_id))
     else:
-        conn.execute("UPDATE jobs SET formatted=2 WHERE id=?", (job_id,))
+        conn.execute("UPDATE postings SET formatted=2 WHERE id=?", (job_id,))
     conn.commit()
 
 

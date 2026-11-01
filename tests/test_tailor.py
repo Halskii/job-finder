@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 import db
+from tests import pgtest
 import main
 import sources
 import tailor
@@ -91,7 +92,7 @@ class TailorJobTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
         (self.root / "profile.json").write_text(json.dumps({"name": "James Hall", "location": "Austin, TX"}), encoding="utf-8")
-        self.conn = db.connect(str(self.root / "jobs.db"))
+        self.conn = pgtest.connect()
         db.add_job(self.conn, sources.Job("gh:co:1", "greenhouse", "CoreWeave", "Software and AI Engineer", "Bellevue, WA",
                                           "https://example.com/1", description="Build agents."), 1.0)
         self.written = []
@@ -102,11 +103,11 @@ class TailorJobTests(unittest.TestCase):
 
     def run_job(self, client, job_id="gh:co:1", pages=1):
         raw = "James Hall\nAustin, TX  |  (555) 010-0000  |  jh@example.com\nSUMMARY\nx"
-        with mock.patch.object(tailor, "ROOT", self.root), mock.patch.object(main, "load_resume", return_value="RESUME TEXT"), \
+        with mock.patch.object(main, "load_resume", return_value="RESUME TEXT"), \
                 mock.patch.object(main, "read_resume_file", return_value=raw), \
                 mock.patch.object(tailor, "html_to_pdf", lambda page, out: self.written.append((out.name, page))), \
                 mock.patch.object(tailor, "page_count", return_value=pages):
-            return tailor.tailor_job(self.conn, job_id, out_dir=self.root / "Optimized Resumes", client=client)
+            return tailor.tailor_job(self.conn, job_id, out_dir=self.root / "Optimized Resumes", client=client, home=self.root)
 
     def test_writes_both_files_named_after_the_job(self):
         client, calls = fake_client()
@@ -147,10 +148,10 @@ class TailorJobTests(unittest.TestCase):
         self.run_job(client)
         self.assertNotIn("OWN REQUEST", calls[0]["messages"][0]["content"])
         client, calls = fake_client()
-        with mock.patch.object(tailor, "ROOT", self.root), mock.patch.object(main, "load_resume", return_value="R"), \
+        with mock.patch.object(main, "load_resume", return_value="R"), \
                 mock.patch.object(main, "read_resume_file", return_value="x"), mock.patch.object(tailor, "html_to_pdf"), \
                 mock.patch.object(tailor, "page_count", return_value=1):
-            tailor.tailor_job(self.conn, "gh:co:1", out_dir=self.root / "o", client=client,
+            tailor.tailor_job(self.conn, "gh:co:1", out_dir=self.root / "o", client=client, home=self.root,
                               resume_request="Lead with Kubernetes", letter_request="  Keep it short  ")
         sent = calls[0]["messages"][0]["content"]
         self.assertIn("OWN REQUEST FOR THE RESUME (follow it; it overrides the style rules above, but never the rules about facts):\nLead with Kubernetes", sent)

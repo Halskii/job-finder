@@ -1,12 +1,13 @@
 """Offline tests for hourly pay: finding the rate, comparing it with a yearly minimum, and showing it."""
 import json
-import sqlite3
+
 import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
 import db
+from tests import pgtest
 import filters
 import scorer
 import sources
@@ -64,29 +65,13 @@ class ScorerAndStorageTests(unittest.TestCase):
         scorer.score_job(client, "m", {}, {**job, "pay_min": 90000, "pay_max": 100000, "pay_unit": "year"}, 80000)
         self.assertIn("Listed pay: $90,000 - $100,000\n", sent[1]["messages"][0]["content"])
 
-    def test_the_unit_is_stored_and_old_postings_are_backfilled_once(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            path = str(Path(tmp) / "jobs.db")
-            old = sqlite3.connect(path)
-            old.execute("CREATE TABLE jobs (id TEXT PRIMARY KEY, source TEXT, company TEXT, title TEXT, location TEXT, url TEXT, posted TEXT,"
-                        " pay_min INTEGER, pay_max INTEGER, description TEXT, quick_score REAL, score INTEGER, verdict TEXT, analysis TEXT,"
-                        " status TEXT DEFAULT 'new', first_seen REAL, notes TEXT)")
-            old.execute("INSERT INTO jobs (id, title, description) VALUES ('gh:a:1', 'Hourly', 'We pay $40/hr-45/hr')")
-            old.execute("INSERT INTO jobs (id, title, description) VALUES ('gh:a:2', 'None', 'no pay words')")
-            old.execute("INSERT INTO jobs (id, title, description, pay_min, pay_max) VALUES ('gh:a:3', 'Yearly', 'we pay $9/hr extra', 100000, 120000)")
-            old.commit()
-            old.close()
-            conn = db.connect(path)
-            rows = {r["id"]: (r["pay_min"], r["pay_max"], r["pay_unit"]) for r in conn.execute("SELECT * FROM jobs")}
-            self.assertEqual(rows, {"gh:a:1": (40, 45, "hour"), "gh:a:2": (None, None, "year"), "gh:a:3": (100000, 120000, "year")})
-            conn.execute("UPDATE jobs SET pay_min=NULL, pay_max=NULL WHERE id='gh:a:1'")   # the backfill runs once, not on every connect
-            conn.commit()
-            conn.close()
-            conn = db.connect(path)
-            self.assertIsNone(conn.execute("SELECT pay_min FROM jobs WHERE id='gh:a:1'").fetchone()[0])
-            db.add_job(conn, sources.Job("gh:a:4", "x", "C", "T", "L", "u", description="d", pay_min=22.5, pay_max=30, pay_unit="hour"), 1.0)
-            self.assertEqual(tuple(conn.execute("SELECT pay_min, pay_max, pay_unit FROM jobs WHERE id='gh:a:4'").fetchone()), (22.5, 30, "hour"))
-            conn.close()
+    def test_the_unit_and_fractions_of_a_dollar_are_stored(self):
+        conn = pgtest.connect()
+        db.add_job(conn, sources.Job("gh:a:4", "x", "C", "T", "L", "u", description="d", pay_min=22.5, pay_max=30, pay_unit="hour"), 1.0)
+        db.add_job(conn, sources.Job("gh:a:5", "x", "C", "T2", "L", "u", description="d", pay_min=100000, pay_max=120000), 1.0)
+        rows = {r["id"]: (r["pay_min"], r["pay_max"], r["pay_unit"]) for r in conn.execute("SELECT * FROM jobs")}
+        self.assertEqual(rows, {"gh:a:4": (22.5, 30, "hour"), "gh:a:5": (100000, 120000, "year")})
+        conn.close()
 
 
 if __name__ == "__main__":

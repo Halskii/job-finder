@@ -25,7 +25,9 @@ class BadModelAnswer(UserError, ValueError):
 
 
 # the HTTP status each kind of failure is reported with (anything not listed is a 422: the person can fix it)
-STATUS = {"internal": 500, "rate_limited": 429, "offline": 502, "claude_down": 502}
+STATUS = {"internal": 500, "rate_limited": 429, "offline": 502, "claude_down": 502,
+          "not_signed_in": 401, "bad_login": 401, "bad_google_token": 401, "email_unverified": 403, "email_taken": 409,
+          "too_many_attempts": 429, "google_off": 503, "weak_password": 400, "invalid_email": 400, "busy": 409}
 
 
 def explain(ex: BaseException) -> tuple[str, str]:
@@ -51,6 +53,6 @@ def explain(ex: BaseException) -> tuple[str, str]:
     if isinstance(ex, PermissionError):
         return "Could not save the file. If it is open in another program, close it and try again.", "file_in_use"
     if isinstance(ex, FileNotFoundError):
-        return "A file the program needs was not found. Check that resume.pdf and profile.json are in the job-finder folder.", "missing_file"
+        return "A file the program needs was not found. Upload your resume and fill in your profile, then try again.", "missing_file"
     log.error("Unexpected error: %s", name, exc_info=ex)
     return "Something went wrong on our side. Try again, and if it keeps happening, look at the terminal window for details.", "internal"

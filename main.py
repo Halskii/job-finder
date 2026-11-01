@@ -43,15 +43,16 @@ def load_env() -> None:
                 os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
 
 
-def read_resume_file() -> str:
-    """Prefer resume.pdf, then resume.txt / resume.md. Returns raw text, or '' if none exists."""
-    pdf = ROOT / "resume.pdf"
+def read_resume_file(home: Path | None = None) -> str:
+    """Prefer resume.pdf, then resume.txt / resume.md, in the user's folder (the project folder by default). Returns raw text, or '' if none exists."""
+    home = home or ROOT
+    pdf = home / "resume.pdf"
     if pdf.exists():
         from pypdf import PdfReader
         text = "\n".join((p.extract_text() or "") for p in PdfReader(str(pdf)).pages)
         return text.replace("ﬁ", "fi").replace("ﬂ", "fl")   # PDF ligatures
     for name in ("resume.txt", "resume.md"):
-        path = ROOT / name
+        path = home / name
         if path.exists():
             return path.read_text(encoding="utf-8")
     return ""
@@ -61,9 +62,9 @@ def read_resume_file() -> str:
 PHONE_RE = re.compile(r"(?<!\d)(?:\+?1[-. ]?)?\(?\d{3}\)?[-. ]?\d{3}[-. ]\d{4}(?!\d)")
 
 
-def load_resume() -> str:
+def load_resume(home: Path | None = None) -> str:
     """Load the resume. Contact lines (email, phone, links) are removed before anything is sent to the API."""
-    raw = read_resume_file()
+    raw = read_resume_file(home)
     if not raw:
         return ""
     keep = []
@@ -650,7 +651,8 @@ def main() -> None:
                  "show (citizenship, clearance, do_not_assume), then run: python main.py profile")
     cfg = discovery.load_config(ROOT)
     profile = json.loads((ROOT / "profile.json").read_text(encoding="utf-8"))
-    conn = db.connect(str(ROOT / "jobs.db"))
+    load_env()
+    conn = db.connect()
     # Every command takes the same four arguments, even those that ignore some of them.
     {"run": cmd_run, "list": cmd_list, "mark": cmd_mark, "profile": cmd_profile,
      "discover": cmd_discover, "workday-add": cmd_workday_add, "crawl": cmd_crawl, "reformat": cmd_reformat}[args.cmd](args, cfg, profile, conn)

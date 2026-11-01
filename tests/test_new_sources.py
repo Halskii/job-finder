@@ -11,6 +11,7 @@ from unittest import mock
 
 import ats_sources as ats
 import db
+from tests import pgtest
 import feed_sources as fs
 import main
 import sources
@@ -206,7 +207,7 @@ class FeedCollectTests(unittest.TestCase):
                  "hackernews": lambda f, cfg: calls.append("hn") or [sources.Job(id="hn:1", source="hackernews", company="A", title="T", location="", url="u")]}
         cfg = {"feeds": {"remoteok": {"enabled": True}, "jobicy": {"enabled": True}, "hackernews": {"enabled": True, "min_hours": 1}, "himalayas": {}}}
         with tempfile.TemporaryDirectory() as d:
-            conn = db.connect(str(Path(d) / "jobs.db"))
+            conn = pgtest.connect()
             with mock.patch.dict(main.FEEDS, fakes), redirect_stdout(io.StringIO()):
                 self.assertEqual([j.id for j in main.collect_feeds(cfg, conn)], ["hn:1"])
                 self.assertEqual(main.collect_feeds(cfg, conn), [])        # all inside their windows now
@@ -219,7 +220,7 @@ class FeedCollectTests(unittest.TestCase):
         called = []
         out = io.StringIO()
         with tempfile.TemporaryDirectory() as d:
-            conn = db.connect(str(Path(d) / "jobs.db"))
+            conn = pgtest.connect()
             with mock.patch.dict(main.FEEDS, {"adzuna": lambda f, c: called.append(1) or []}), mock.patch.object(main, "load_env"),                     mock.patch.dict("os.environ", {}, clear=True), redirect_stdout(out):
                 main.collect_feeds(cfg, conn)
                 self.assertEqual(called, [])

@@ -12,6 +12,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 import db
+from tests import pgtest
 import main
 import sources
 
@@ -33,7 +34,7 @@ class PipelineBase(unittest.TestCase):
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.conn = db.connect(str(Path(self.tmp.name) / "jobs.db"))
+        self.conn = pgtest.connect()
 
     def tearDown(self):
         self.conn.close()
