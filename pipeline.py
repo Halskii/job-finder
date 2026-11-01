@@ -21,6 +21,7 @@ from types import SimpleNamespace
 import db
 import filters
 import ingest
+import limits
 import scorer
 import tailor
 import userdata
@@ -148,7 +149,9 @@ def score_batches(conn, rules: Rules, profile: dict, settings: dict, scfg: dict,
     row = conn.execute("SELECT scored FROM user_runs WHERE user_id = ?", (conn.user_id,)).fetchone()
     scored = row["scored"] if row else 0
     while True:
-        left = scfg["max_per_user_per_day"] - db.usage_today(conn, "score")
+        if limits.paused():
+            return "paused"
+        left = min(scfg["max_per_user_per_day"] - db.usage_today(conn, "score"), limits.everyone_left(conn, "score"))   # this person's limit, and the whole site's
         todo_ids = pending(conn, rules, skip)
         _save(conn, waiting=len(todo_ids), scored=scored)
         if not todo_ids:
@@ -230,6 +233,8 @@ def run_user(uid: int, client=None) -> dict:
         if outcome == "limit":
             waiting = len(pending(conn, rules, skip))
             _save(conn, state="done", message=f"Today's scoring limit is reached. The other {waiting} matches are scored tomorrow.", waiting=waiting)
+        elif outcome == "paused":
+            _save(conn, state="done", message=limits.PAUSED + " Your matches are scored when it resumes.", waiting=len(pending(conn, rules, skip)))
         elif outcome != "error":
             _save(conn, state="done", message="", waiting=0)
         return status(conn)

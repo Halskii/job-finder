@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import os
 import re
 import secrets
 import time
@@ -59,14 +60,50 @@ def clean_email(email) -> str:
 
 # ---------------------------------------------------------------- accounts
 
+NOT_INVITED = ("This alpha is invite-only. Sign up with the email address you were invited at, or ask for an invite.", "not_invited")
+
+
+def signups_open() -> bool:
+    """False (the default) while only invited people may create accounts. Set SIGNUP_MODE=open to let anyone."""
+    return os.environ.get("SIGNUP_MODE", "invite").strip().lower() == "open"
+
+
+def is_invited(conn, email: str) -> bool:
+    return conn.execute("SELECT 1 FROM invites WHERE email = ?", (email.strip().lower(),)).fetchone() is not None
+
+
+def add_invites(conn, emails, note: str = "") -> list[str]:
+    """Let these email addresses create an account. Returns the cleaned addresses."""
+    cleaned = [clean_email(e) for e in emails]
+    conn.executemany("INSERT INTO invites (email, added, note) VALUES (?, ?, ?) ON CONFLICT (email) DO NOTHING", [(e, time.time(), note) for e in cleaned])
+    conn.commit()
+    return cleaned
+
+
+def remove_invites(conn, emails) -> int:
+    n = 0
+    for e in emails:
+        n += conn.execute("DELETE FROM invites WHERE email = ?", (clean_email(e),)).rowcount
+    conn.commit()
+    return n
+
+
+def list_invites(conn) -> list:
+    """Every invite, with whether that person has made an account yet."""
+    return conn.execute("SELECT i.email, i.added, i.note, u.id IS NOT NULL AS joined FROM invites i LEFT JOIN users u ON lower(u.email) = i.email"
+                        " ORDER BY i.added, i.email").fetchall()
+
+
 def public(row) -> dict:
     """The part of an account that is safe to send to the page."""
     return {"id": row["id"], "email": row["email"], "name": row["name"] or ""}
 
 
-def sign_up(conn, email, password, name: str = "") -> dict:
+def sign_up(conn, email, password, name: str = "", invite_only: bool = False) -> dict:
     email = clean_email(email)
     check_password_rules(password)
+    if invite_only and not is_invited(conn, email):
+        raise UserError(*NOT_INVITED)
     name = " ".join(str(name or "").split())[:80]
     row = conn.execute("INSERT INTO users (email, password_hash, name) VALUES (?, ?, ?) ON CONFLICT (lower(email)) DO NOTHING"
                        " RETURNING id, email, name", (email, hash_password(password), name)).fetchone()
@@ -107,7 +144,7 @@ def verify_google_token(token: str, client_id: str) -> dict:
     return claims
 
 
-def google_sign_in(conn, token: str, client_id: str, verify=verify_google_token) -> dict:
+def google_sign_in(conn, token: str, client_id: str, verify=verify_google_token, invite_only: bool = False) -> dict:
     """Sign in with a Google ID token, creating the account on the first visit. An account made earlier with the same email
     is linked; if that one was a password account whose email was never confirmed, its password is removed first, so someone
     who signed up with another person's address cannot keep access after the real owner arrives."""
@@ -128,6 +165,8 @@ def google_sign_in(conn, token: str, client_id: str, verify=verify_google_token)
             conn.execute("UPDATE users SET google_sub = ?, email_verified = TRUE, name = CASE WHEN name = '' THEN ? ELSE name END"
                          " WHERE id = ?", (sub, name, row["id"]))
         else:
+            if invite_only and not is_invited(conn, email):   # a new account needs an invite; an existing one never does
+                raise UserError(*NOT_INVITED)
             row = conn.execute("INSERT INTO users (email, google_sub, name, email_verified) VALUES (?, ?, ?, TRUE)"
                                " RETURNING id, email, name", (email, sub, name)).fetchone()
     conn.commit()

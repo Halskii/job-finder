@@ -32,6 +32,7 @@ button.go:disabled{opacity:.6;cursor:default}
 .or{display:flex;align-items:center;gap:10px;margin:18px 0 14px;color:var(--mute);font-size:13px}
 .or::before,.or::after{content:"";flex:1;border-top:1px solid var(--line)}
 #google{display:flex;justify-content:center;min-height:44px}
+.foot{margin:18px 0 0;text-align:center;font-size:13px}.foot a{color:var(--mute)}
 [hidden]{display:none!important}
 </style></head><body>
 <main>
@@ -50,6 +51,7 @@ button.go:disabled{opacity:.6;cursor:default}
 <div id="err" role="alert"></div>
 </form>
 <div id="google-box" hidden><div class="or">or</div><div id="google"></div></div>
+<p class="foot"><a href="/privacy">Privacy</a></p>
 </main>
 <script>
 const CLIENT_ID=__CLIENT_ID__;

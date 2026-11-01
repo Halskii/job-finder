@@ -15,7 +15,7 @@ import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -618,6 +618,43 @@ def cmd_fetch(args, cfg, profile, conn) -> None:
         f"Dropped {stats['purged']:,} nobody lists any more. Queued {stats['queued']} user(s) for a new search. Took {stats['seconds']}s.")
 
 
+def cmd_invite(args, cfg, profile, conn) -> None:
+    """Who may create an account while the site is invite-only (SIGNUP_MODE, default invite). People who already have one are not affected."""
+    import auth
+    if args.action == "add":
+        done = auth.add_invites(conn, args.emails, args.note or "")
+        log(f"Invited {len(done)}: {', '.join(done)}" if done else "Give at least one email address.")
+    elif args.action == "remove":
+        log(f"Removed {auth.remove_invites(conn, args.emails)} invite(s). Anyone who already made an account keeps it.")
+    else:
+        rows = auth.list_invites(conn)
+        for r in rows:
+            log(f"  {r['email']:40s} {'signed up' if r['joined'] else 'not yet'}{'  ' + r['note'] if r['note'] else ''}")
+        log(f"{len(rows)} invite(s), {sum(1 for r in rows if r['joined'])} signed up.")
+
+
+def cmd_usage(args, cfg, profile, conn) -> None:
+    """What the paid calls added up to: for everyone together, and for each person, over the last few days. Counts, and the tokens sent and received."""
+    since = (date.today() - timedelta(days=max(1, args.days) - 1)).isoformat()
+    anon = db.connect(user=False)
+    try:
+        log(f"Everyone, since {since}:")
+        for r in anon.execute("SELECT day, kind, calls FROM usage_totals WHERE day >= ? ORDER BY day DESC, kind", (since,)).fetchall():
+            log(f"  {r['day']}  {r['kind']:8s} {r['calls']:6d} calls")
+        for u in anon.execute("SELECT id, email FROM users ORDER BY id").fetchall():
+            person = db.connect(user=u["id"])   # each person's rows are private, so they are read as that person
+            try:
+                rows = person.execute("SELECT day, kind, calls, tokens_in, tokens_out FROM usage WHERE day >= ? ORDER BY day DESC, kind", (since,)).fetchall()
+            finally:
+                person.close()
+            if rows:
+                log(f"\n{u['email']}:")
+                for r in rows:
+                    log(f"  {r['day']}  {r['kind']:8s} {r['calls']:6d} calls  {r['tokens_in']:>10,} tokens in  {r['tokens_out']:>9,} out")
+    finally:
+        anon.close()
+
+
 def cmd_mark(args, cfg, profile, conn) -> None:
     if args.status not in STATUSES:
         sys.exit(f"status must be one of: {', '.join(sorted(STATUSES))}")
@@ -633,6 +670,12 @@ def main() -> None:
     r = sub.add_parser("run", help="fetch, filter, score, and write a report")
     r.add_argument("--no-llm", action="store_true", help="fetch and filter only (no API calls)")
     r.add_argument("--limit", type=int, help="max LLM scoring calls this run")
+    iv = sub.add_parser("invite", help="choose who may create an account while sign-ups are invite-only")
+    iv.add_argument("action", choices=["add", "remove", "list"])
+    iv.add_argument("emails", nargs="*", help="email addresses")
+    iv.add_argument("--note", help="a reminder of who this is (shown by `invite list`)")
+    us = sub.add_parser("usage", help="what the paid Claude calls added up to, per day and per person")
+    us.add_argument("--days", type=int, default=7, help="how many days back (default 7)")
     f = sub.add_parser("fetch", help="read every source once for all users and keep the postings (run daily; see ingest.py)")
     f.add_argument("--no-queue", action="store_true", help="don't mark users as waiting for a new search afterwards")
     f.add_argument("--keep-days", type=int, help="drop postings nobody has listed for this many days (default 14)")
@@ -664,7 +707,7 @@ def main() -> None:
 
     if not (ROOT / "config.yaml").exists():
         sys.exit("config.yaml not found. Copy config.example.yaml to config.yaml, then edit it (see the README).")
-    if args.cmd != "fetch" and not (ROOT / "profile.json").exists():   # the shared fetch is nobody's own
+    if args.cmd not in ("fetch", "invite", "usage") and not (ROOT / "profile.json").exists():   # the shared fetch is nobody's own
         sys.exit("profile.json not found. Copy profile.example.json to profile.json and fill in the facts a resume can't "
                  "show (citizenship, clearance, do_not_assume), then run: python main.py profile")
     load_env()
@@ -674,7 +717,7 @@ def main() -> None:
     # Every command takes the same four arguments, even those that ignore some of them.
     {"run": cmd_run, "list": cmd_list, "mark": cmd_mark, "profile": cmd_profile,
      "discover": cmd_discover, "workday-add": cmd_workday_add, "crawl": cmd_crawl, "reformat": cmd_reformat,
-     "fetch": cmd_fetch}[args.cmd](args, cfg, profile, conn)
+     "fetch": cmd_fetch, "invite": cmd_invite, "usage": cmd_usage}[args.cmd](args, cfg, profile, conn)
 
 
 if __name__ == "__main__":

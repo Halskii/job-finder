@@ -15,6 +15,12 @@ crawl_every_days: 30    # the web app looks for new company boards (for everyone
 fetch_every_hours: 0     # the web app reads every source for all users this often (24 = daily). 0 = only when you run `python main.py fetch`
 keep_postings_days: 14   # postings no source has listed for this long are deleted (unless a user has them as one of their jobs)
 store_max_age_days: 90   # postings clearly older than this are not stored at all
+# Paid calls (scoring, resume tailoring, interview prep, resume reading) allowed per day: for one person, and for the whole site together.
+# Scoring's per-person limit is scoring.max_per_user_per_day. Read on every check, so edits apply at once. paused: true stops them all (a kill switch).
+limits:
+  per_user_per_day: {tailor: 6, tips: 12, analyze: 6}
+  all_users_per_day: {score: 4000, tailor: 100, tips: 300, analyze: 100}
+  paused: false
 request_delay: 0.4        # seconds between HTTP requests (be polite to job boards)
 
 profile_model: claude-sonnet-5-5   # used by `main.py profile` to read resume.pdf

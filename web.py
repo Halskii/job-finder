@@ -23,9 +23,11 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 import auth
 import db
+import limits
 import loginpage
 import onboarding
 import pipeline
+import privacypage
 import profilepage
 import reformat
 import tailor
@@ -88,8 +90,8 @@ async def _unexpected(request: Request, ex: Exception):
 
 def allowed_hosts() -> set[str]:
     """The host names this server answers to (ALLOWED_HOSTS, comma separated). Anything else could be a DNS-rebinding attempt."""
-    raw = os.environ.get("ALLOWED_HOSTS", "127.0.0.1,localhost,[::1]")
-    return {h.strip().strip("[]").lower() for h in raw.split(",") if h.strip()}
+    raw = os.environ.get("ALLOWED_HOSTS", "")
+    return {"127.0.0.1", "localhost", "::1"} | {h.strip().strip("[]").lower() for h in raw.split(",") if h.strip()}   # this computer's own names always work (health checks)
 
 
 def google_client_id() -> str:
@@ -227,6 +229,26 @@ def run_auth(fn):
         conn.close()
 
 
+@app.get("/healthz")
+def healthz():
+    """For the load balancer and the container's health check: answers when the app is up and the database answers."""
+    conn = None
+    try:
+        conn = auth_db()
+        conn.execute("SELECT 1").fetchone()
+        return {"ok": True}
+    except Exception:
+        raise Problem(503, "The database is not answering.", "db_down") from None
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+@app.get("/privacy")
+def privacy():
+    return HTMLResponse(privacypage.render(os.environ.get("CONTACT_EMAIL", "")))
+
+
 @app.get("/login")
 def login_page(request: Request):
     if session_user(request):
@@ -236,7 +258,7 @@ def login_page(request: Request):
 
 @app.post("/auth/signup")
 def signup(request: Request, body: dict = Depends(json_body)):
-    user = run_auth(lambda c: auth.sign_up(c, body.get("email"), body.get("password"), body.get("name", "")))
+    user = run_auth(lambda c: auth.sign_up(c, body.get("email"), body.get("password"), body.get("name", ""), invite_only=not auth.signups_open()))
     return start_session(request, user)
 
 
@@ -252,8 +274,26 @@ def google_login(request: Request, body: dict = Depends(json_body)):
     credential = body.get("credential")
     if not isinstance(credential, str) or not credential:
         raise bad_request()
-    user = run_auth(lambda c: auth.google_sign_in(c, credential, google_client_id(), auth.verify_google_token))
+    user = run_auth(lambda c: auth.google_sign_in(c, credential, google_client_id(), auth.verify_google_token, invite_only=not auth.signups_open()))
     return start_session(request, user)
+
+
+@app.post("/api/account/delete")
+def delete_account(body: dict = Depends(json_body), user: dict = Depends(current_user)):
+    """Delete the signed-in person's account and everything that belongs to it, at once. They must type their own email to confirm."""
+    if str(body.get("confirm", "")).strip().lower() != user["email"].lower():
+        raise Problem(400, "Type your email address exactly as shown to confirm.", "invalid")
+    uid = user["id"]
+    conn = auth_db()
+    try:
+        conn.execute("DELETE FROM users WHERE id = ?", (uid,))   # their sessions, jobs, rounds, prep, usage and run state go with it
+        conn.commit()
+    finally:
+        conn.close()
+    userdata.delete_home(uid)
+    response = JSONResponse({"ok": True})
+    response.delete_cookie(COOKIE, path="/")
+    return response
 
 
 @app.post("/auth/logout")
@@ -331,9 +371,12 @@ def analyze_resume(user: dict = Depends(current_user)):
     lock = user_lock("analyze", uid)
     if not lock.acquire(blocking=False):
         raise Problem(409, "Already reading your resume. Wait for it to finish.", "busy")
+    conn = viewer._db(uid)
     try:
-        return onboarding.analyze(tailor.make_client(), text)
+        with limits.paid_call(conn, "analyze"):
+            return onboarding.analyze(tailor.make_client(), text)
     finally:
+        conn.close()
         lock.release()
 
 
@@ -499,12 +542,17 @@ def tailor_(body: dict = Depends(json_body), user: dict = Depends(current_user))
     lock = user_lock("tailor", user["id"])
     if not lock.acquire(blocking=False):
         raise Problem(409, "Already working on another job. Wait for it to finish.", "busy")
+    conn = viewer._db(user["id"])
     try:
-        return viewer.tailor_for(user["id"], job_id, tailor.clean_request(body.get("resume_request")),
-                                 tailor.clean_request(body.get("letter_request")))
+        with limits.paid_call(conn, "tailor") as spent:
+            result = viewer.tailor_for(user["id"], job_id, tailor.clean_request(body.get("resume_request")),
+                                       tailor.clean_request(body.get("letter_request")))
+            spent.tokens(result.get("tokens", {}).get("in"), result.get("tokens", {}).get("out"))
+            return result
     except LookupError:
         raise not_found() from None
     finally:
+        conn.close()
         lock.release()
 
 
@@ -514,16 +562,30 @@ def tips_(body: dict = Depends(json_body), user: dict = Depends(current_user)):
     uid, job_id, refresh = user["id"], job_id_of(body), bool(body.get("refresh"))
     if not viewer.job_exists(uid, job_id):
         raise not_found()
+    conn = viewer._db(uid)
+    try:
+        if refresh or not db.get_tips(conn, job_id):   # an answer that is already saved costs nothing, so it is never refused
+            limits.check(conn, "tips")
+    finally:
+        conn.close()
     lock = user_lock("tips", uid)
     if not lock.acquire(blocking=False):
         raise Problem(409, "Interview prep is already being written for another job. Wait for it to finish.", "busy")
     events: queue.SimpleQueue = queue.SimpleQueue()
 
     def work() -> None:   # runs to the end even if the page goes away, so the answer is still written and saved
+        fresh = False
         try:
             for event in viewer.tips_events(uid, job_id, refresh):
+                fresh = fresh or (event.get("type") == "done" and event.get("result", {}).get("cached") is False)
                 events.put(event)
         finally:
+            if fresh:   # a newly written answer was paid for
+                count = viewer._db(uid)
+                try:
+                    db.add_usage(count, "tips")
+                finally:
+                    count.close()
             events.put(None)
             lock.release()
 

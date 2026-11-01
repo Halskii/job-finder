@@ -71,6 +71,11 @@ CREATE TABLE IF NOT EXISTS interview_tips (
   FOREIGN KEY (user_id, job_id) REFERENCES user_jobs (user_id, job_id) ON DELETE CASCADE
 );
 
+-- What everyone together has used today, per kind of paid call. No row-level security: it holds only totals, and the daily limit for the whole site
+-- has to see all users.
+CREATE TABLE IF NOT EXISTS usage_totals (day TEXT NOT NULL, kind TEXT NOT NULL, calls INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (day, kind));
+-- Who may create an account while sign-ups are invite-only (SIGNUP_MODE). People who already have an account are never affected.
+CREATE TABLE IF NOT EXISTS invites (email TEXT PRIMARY KEY, added DOUBLE PRECISION NOT NULL, note TEXT NOT NULL DEFAULT '');
 -- Company job boards found by `main.py crawl`, `discover` and `workday-add`, shared by everyone. `fails` counts fetches in a row that found
 -- the board gone, and a board is dropped after a few.
 CREATE TABLE IF NOT EXISTS boards (
@@ -461,12 +466,20 @@ def add_usage(conn, kind: str, calls: int = 1, tokens_in: int = 0, tokens_out: i
                  " ON CONFLICT (user_id, day, kind) DO UPDATE SET calls = usage.calls + excluded.calls,"
                  " tokens_in = usage.tokens_in + excluded.tokens_in, tokens_out = usage.tokens_out + excluded.tokens_out",
                  (conn.user_id, date.today().isoformat(), kind, calls, tokens_in, tokens_out))
+    conn.execute("INSERT INTO usage_totals (day, kind, calls) VALUES (?, ?, ?) ON CONFLICT (day, kind) DO UPDATE SET calls = usage_totals.calls + excluded.calls",
+                 (date.today().isoformat(), kind, calls))
     conn.commit()
 
 
 def usage_today(conn, kind: str) -> int:
     """How many paid calls of this kind this user has made today."""
     row = conn.execute("SELECT calls FROM usage WHERE day = ? AND kind = ?", (date.today().isoformat(), kind)).fetchone()
+    return row["calls"] if row else 0
+
+
+def usage_total_today(conn, kind: str) -> int:
+    """How many paid calls of this kind everyone together has made today."""
+    row = conn.execute("SELECT calls FROM usage_totals WHERE day = ? AND kind = ?", (date.today().isoformat(), kind)).fetchone()
     return row["calls"] if row else 0
 
 
