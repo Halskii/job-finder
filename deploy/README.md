@@ -70,10 +70,21 @@ Google Cloud console, APIs & Services, Credentials, your OAuth client: under **A
 A fresh server knows no company boards and no postings, so its first start would spend hours crawling and fetching. Copying yours skips that, and keeps your own account. On your PC (PowerShell):
 
 ```powershell
-& "C:\Program Files\PostgreSQL\17\bin\pg_dump.exe" -Fc -n public --no-owner --no-acl -f jobfinder.dump "YOUR_LOCAL_DATABASE_URL"
+$url = (Select-String -Path .env -Pattern '^DATABASE_URL=').Line.Substring(13)      # your local database address, read from .env
+$psql = "C:\Program Files\PostgreSQL\17\bin\psql.exe"
+$tables = "user_jobs","interview_rounds","interview_tips","usage"
+try {
+  # people's data is locked even against the owner, so pg_dump is refused; unlock for the length of the dump (stop the local app first)
+  foreach ($t in $tables) { & $psql $url -c "ALTER TABLE $t NO FORCE ROW LEVEL SECURITY" }
+  & "C:\Program Files\PostgreSQL\17\bin\pg_dump.exe" -Fc -n public --no-owner --no-acl -f jobfinder.dump $url
+} finally {
+  foreach ($t in $tables) { & $psql $url -c "ALTER TABLE $t FORCE ROW LEVEL SECURITY" }
+}
 scp -i your-key.pem jobfinder.dump ubuntu@YOUR_ELASTIC_IP:~/
 scp -i your-key.pem -r data\users ubuntu@YOUR_ELASTIC_IP:~/users
 ```
+
+The restored database arrives without that lock; the app turns it back on the first time it connects. Delete `jobfinder.dump` from your PC when you are done: it holds your data.
 
 On the server, from the `job-finder` folder (an "already exists" error for schema `public` is harmless):
 
