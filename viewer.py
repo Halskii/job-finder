@@ -701,13 +701,14 @@ function paintProgress(s){
   const box=$("#progress");
   box.className=s.state==="error"?"err":"";
   const again=el("button",{className:"link",textContent:"Check for new jobs",onclick:async()=>{try{paintProgress(await post("/api/matches/refresh",{}));pollProgress()}catch(e){fail("Couldn't start the search",e)}}});
+  const retry=s.can_refresh?[again]:[];   // the link only exists where the server allows people to start a search themselves
   if(s.state==="queued"||s.state==="matching"){box.replaceChildren(el("span",{className:"spinner"}),el("span",{textContent:"Finding jobs that fit your search..."}))}
   else if(s.state==="scoring"){box.replaceChildren(el("span",{className:"spinner"}),el("span",{textContent:"Scoring your matches: "+s.scored+" done, "+s.waiting+" to go. The best ones come first."}))}
-  else if(s.state==="error"){box.replaceChildren(s.message||"Something went wrong while scoring.",again)}
-  else if(s.message){box.replaceChildren(s.message,again)}
+  else if(s.state==="error"){box.replaceChildren(s.message||"Something went wrong while scoring.",...retry)}
+  else if(s.message){box.replaceChildren(s.message,...retry)}
   else if(s.matched===0&&s.state!=="idle"){box.replaceChildren("No postings fit your search yet. ",el("a",{href:"/profile",textContent:"Change your search",style:"color:var(--accent)"}))}
-  else{box.replaceChildren(again)}
-  box.hidden=false;
+  else{box.replaceChildren(...retry)}
+  box.hidden=!box.childNodes.length;
 }
 async function pollProgress(){
   clearTimeout(pollTimer);
