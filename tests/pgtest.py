@@ -9,6 +9,7 @@ from __future__ import annotations
 import atexit
 import os
 import uuid
+import weakref
 from pathlib import Path
 
 import psycopg
@@ -16,7 +17,8 @@ import psycopg
 import db
 
 _made: list[str] = []
-_open: list = []   # connections made here; closed before the schemas are dropped, or the drop waits for their locks
+_open: weakref.WeakSet = weakref.WeakSet()   # connections made here that are still alive: closed before the schemas are dropped (or the drop waits for
+#                                                              their locks). Ones a test has let go of are closed when they are collected, so a long run never runs out.
 
 
 def url() -> str:
@@ -41,7 +43,7 @@ def connect(schema: str | None = None, user=None) -> db.Conn:
     schema = schema or new_schema()
     conn = db.connect(url(), schema=schema, user=user)
     conn.schema = schema
-    _open.append(conn)
+    _open.add(conn)
     return conn
 
 
@@ -51,7 +53,7 @@ def args(schema: str, user=None) -> dict:
 
 
 def _drop(names: list[str]) -> None:
-    for conn in _open:
+    for conn in list(_open):
         try:
             conn.close()
         except Exception:

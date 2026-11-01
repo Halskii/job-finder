@@ -61,9 +61,17 @@ def merge_sources(base: dict, extra: dict) -> dict:
     return out
 
 
-def load_config(root: Path) -> dict:
+def load_config(root: Path, conn=None) -> dict:
+    """config.yaml with the discovered boards merged into its `sources`. With a database connection they come from the boards table
+    (the older discovered_sources.yaml is copied in the first time); without one, from that file."""
     cfg = yaml.safe_load((Path(root) / "config.yaml").read_text(encoding="utf-8"))
-    cfg["sources"] = merge_sources(cfg.get("sources") or {}, load_discovered(root))
+    if conn is not None:
+        import boards
+        boards.import_yaml(conn, root)
+        found = boards.load(conn)
+    else:
+        found = load_discovered(root)
+    cfg["sources"] = merge_sources(cfg.get("sources") or {}, found)
     return cfg
 
 

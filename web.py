@@ -12,6 +12,7 @@ import queue
 import re
 import sys
 import threading
+import time
 import webbrowser
 from pathlib import Path
 from urllib.parse import urlparse
@@ -22,8 +23,11 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 import auth
 import db
+import limits
 import loginpage
 import onboarding
+import pipeline
+import privacypage
 import profilepage
 import reformat
 import tailor
@@ -36,11 +40,13 @@ log = logging.getLogger("job-finder")
 COOKIE = "session"
 MAX_BODY = 40_000          # room for two 2,000-character requests, even all non-ASCII
 MAX_UPLOAD = userdata.MAX_RESUME_BYTES
+RUNS = True                # find and score a user's matches in the background after they save their search
 RESTORE = True             # restore the formatting of older postings in the background (python web.py --no-restore turns it off)
 FILE_NAME = re.compile(r"^[A-Za-z0-9_.\-]{1,200}\.(pdf|docx)$")
 MEDIA = {".pdf": "application/pdf", ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"}
 
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)   # no public API documentation page
+pipeline.connect_as = lambda uid: viewer._db(uid) if uid is not False else auth_db()   # the background worker uses the same database
 
 
 class Problem(Exception):
@@ -84,8 +90,8 @@ async def _unexpected(request: Request, ex: Exception):
 
 def allowed_hosts() -> set[str]:
     """The host names this server answers to (ALLOWED_HOSTS, comma separated). Anything else could be a DNS-rebinding attempt."""
-    raw = os.environ.get("ALLOWED_HOSTS", "127.0.0.1,localhost,[::1]")
-    return {h.strip().strip("[]").lower() for h in raw.split(",") if h.strip()}
+    raw = os.environ.get("ALLOWED_HOSTS", "")
+    return {"127.0.0.1", "localhost", "::1"} | {h.strip().strip("[]").lower() for h in raw.split(",") if h.strip()}   # this computer's own names always work (health checks)
 
 
 def google_client_id() -> str:
@@ -223,6 +229,26 @@ def run_auth(fn):
         conn.close()
 
 
+@app.get("/healthz")
+def healthz():
+    """For the load balancer and the container's health check: answers when the app is up and the database answers."""
+    conn = None
+    try:
+        conn = auth_db()
+        conn.execute("SELECT 1").fetchone()
+        return {"ok": True}
+    except Exception:
+        raise Problem(503, "The database is not answering.", "db_down") from None
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+@app.get("/privacy")
+def privacy():
+    return HTMLResponse(privacypage.render(os.environ.get("CONTACT_EMAIL", "")))
+
+
 @app.get("/login")
 def login_page(request: Request):
     if session_user(request):
@@ -232,7 +258,7 @@ def login_page(request: Request):
 
 @app.post("/auth/signup")
 def signup(request: Request, body: dict = Depends(json_body)):
-    user = run_auth(lambda c: auth.sign_up(c, body.get("email"), body.get("password"), body.get("name", "")))
+    user = run_auth(lambda c: auth.sign_up(c, body.get("email"), body.get("password"), body.get("name", ""), invite_only=not auth.signups_open()))
     return start_session(request, user)
 
 
@@ -248,8 +274,26 @@ def google_login(request: Request, body: dict = Depends(json_body)):
     credential = body.get("credential")
     if not isinstance(credential, str) or not credential:
         raise bad_request()
-    user = run_auth(lambda c: auth.google_sign_in(c, credential, google_client_id(), auth.verify_google_token))
+    user = run_auth(lambda c: auth.google_sign_in(c, credential, google_client_id(), auth.verify_google_token, invite_only=not auth.signups_open()))
     return start_session(request, user)
+
+
+@app.post("/api/account/delete")
+def delete_account(body: dict = Depends(json_body), user: dict = Depends(current_user)):
+    """Delete the signed-in person's account and everything that belongs to it, at once. They must type their own email to confirm."""
+    if str(body.get("confirm", "")).strip().lower() != user["email"].lower():
+        raise Problem(400, "Type your email address exactly as shown to confirm.", "invalid")
+    uid = user["id"]
+    conn = auth_db()
+    try:
+        conn.execute("DELETE FROM users WHERE id = ?", (uid,))   # their sessions, jobs, rounds, prep, usage and run state go with it
+        conn.commit()
+    finally:
+        conn.close()
+    userdata.delete_home(uid)
+    response = JSONResponse({"ok": True})
+    response.delete_cookie(COOKIE, path="/")
+    return response
 
 
 @app.post("/auth/logout")
@@ -327,9 +371,12 @@ def analyze_resume(user: dict = Depends(current_user)):
     lock = user_lock("analyze", uid)
     if not lock.acquire(blocking=False):
         raise Problem(409, "Already reading your resume. Wait for it to finish.", "busy")
+    conn = viewer._db(uid)
     try:
-        return onboarding.analyze(tailor.make_client(), text)
+        with limits.paid_call(conn, "analyze"):
+            return onboarding.analyze(tailor.make_client(), text)
     finally:
+        conn.close()
         lock.release()
 
 
@@ -342,6 +389,8 @@ def save_profile(body: dict = Depends(json_body), user: dict = Depends(current_u
         raise Problem(400, "Add at least one job title to search for.", "invalid")
     userdata.save_settings(uid, settings)
     userdata.save_profile(uid, profile)
+    start_run(uid)   # their search is saved: look for jobs that fit it
+    WAKE.set()       # and, if the titles are new to the crawl, find boards for them now
     return {"settings": settings, "profile": profile, "notes": notes}
 
 
@@ -370,6 +419,37 @@ def report(name: str, user: dict = Depends(current_user)):
     if data is None:
         raise Problem(404, "That report does not exist.", "not_found")
     return data
+
+
+@app.get("/api/matches")
+def matches(user: dict = Depends(current_user)):
+    return viewer.load_matches(user["id"])
+
+
+@app.get("/api/matches/status")
+def matches_status(user: dict = Depends(current_user)):
+    conn = viewer._db(user["id"])
+    try:
+        return pipeline.status(conn)
+    finally:
+        conn.close()
+
+
+@app.post("/api/matches/refresh")
+def matches_refresh(user: dict = Depends(current_user)):
+    """Look for new jobs that fit this person's search, and score them."""
+    return start_run(user["id"])
+
+
+def start_run(uid: int) -> dict:
+    """Queue a run for this user and return their status (which says 'queued' at once)."""
+    if RUNS:
+        pipeline.request(uid)
+    conn = viewer._db(uid)
+    try:
+        return pipeline.status(conn)
+    finally:
+        conn.close()
 
 
 @app.get("/api/tracker")
@@ -462,12 +542,17 @@ def tailor_(body: dict = Depends(json_body), user: dict = Depends(current_user))
     lock = user_lock("tailor", user["id"])
     if not lock.acquire(blocking=False):
         raise Problem(409, "Already working on another job. Wait for it to finish.", "busy")
+    conn = viewer._db(user["id"])
     try:
-        return viewer.tailor_for(user["id"], job_id, tailor.clean_request(body.get("resume_request")),
-                                 tailor.clean_request(body.get("letter_request")))
+        with limits.paid_call(conn, "tailor") as spent:
+            result = viewer.tailor_for(user["id"], job_id, tailor.clean_request(body.get("resume_request")),
+                                       tailor.clean_request(body.get("letter_request")))
+            spent.tokens(result.get("tokens", {}).get("in"), result.get("tokens", {}).get("out"))
+            return result
     except LookupError:
         raise not_found() from None
     finally:
+        conn.close()
         lock.release()
 
 
@@ -477,16 +562,30 @@ def tips_(body: dict = Depends(json_body), user: dict = Depends(current_user)):
     uid, job_id, refresh = user["id"], job_id_of(body), bool(body.get("refresh"))
     if not viewer.job_exists(uid, job_id):
         raise not_found()
+    conn = viewer._db(uid)
+    try:
+        if refresh or not db.get_tips(conn, job_id):   # an answer that is already saved costs nothing, so it is never refused
+            limits.check(conn, "tips")
+    finally:
+        conn.close()
     lock = user_lock("tips", uid)
     if not lock.acquire(blocking=False):
         raise Problem(409, "Interview prep is already being written for another job. Wait for it to finish.", "busy")
     events: queue.SimpleQueue = queue.SimpleQueue()
 
     def work() -> None:   # runs to the end even if the page goes away, so the answer is still written and saved
+        fresh = False
         try:
             for event in viewer.tips_events(uid, job_id, refresh):
+                fresh = fresh or (event.get("type") == "done" and event.get("result", {}).get("cached") is False)
                 events.put(event)
         finally:
+            if fresh:   # a newly written answer was paid for
+                count = viewer._db(uid)
+                try:
+                    db.add_usage(count, "tips")
+                finally:
+                    count.close()
             events.put(None)
             lock.release()
 
@@ -500,6 +599,48 @@ def tips_(body: dict = Depends(json_body), user: dict = Depends(current_user)):
 
 
 # ---------------------------------------------------------------- start-up
+
+WAKE = threading.Event()   # set when something happened that the scheduler should look at now, not at its next minute (a saved profile)
+
+
+def scheduler() -> None:
+    """Runs for as long as the server does. Every minute (or at once when woken): hands the worker any user marked as waiting (the
+    daily fetch may have run in another process), and does whatever shared upkeep is due, one thing at a time, in the background:
+    boards for titles nobody has searched yet (at once), the monthly crawl for new boards (`crawl_every_days`, default 30), and the
+    shared fetch of every posting (`fetch_every_hours`, default 0 = only when `main.py fetch` is run)."""
+    import discovery
+    import ingest
+    import main as program
+    busy = threading.Event()
+
+    def work(job: str) -> None:
+        try:
+            result = ingest.run_job(job, connect=pipeline._connect)
+            print(f"Upkeep ({job}) done: {result}", flush=True)
+        except Exception as ex:
+            log.warning("Upkeep (%s) stopped: %s", job, ex)
+        finally:
+            busy.clear()
+
+    while True:
+        try:
+            pipeline.poll_queued()
+            if not busy.is_set():
+                conn = pipeline._connect(False)
+                try:
+                    cfg = discovery.load_config(program.ROOT, conn)
+                    job = ingest.next_job(conn, cfg, float(tailor.config_value("crawl_every_days", 30) or 0),
+                                          float(tailor.config_value("fetch_every_hours", 0) or 0))
+                finally:
+                    conn.close()
+                if job:
+                    busy.set()
+                    threading.Thread(target=work, args=(job,), name=job, daemon=True).start()
+        except Exception as ex:   # a database hiccup must not end the scheduler
+            log.warning("Scheduler: %s", ex)
+        WAKE.wait(60)
+        WAKE.clear()
+
 
 def main() -> None:
     global RESTORE
@@ -519,6 +660,11 @@ def main() -> None:
     except Exception as ex:
         sys.exit(f"Could not open the database: {ex}\nCheck DATABASE_URL in the .env file and that PostgreSQL is running.")
     # "localhost", not 127.0.0.1: Google treats them as different origins and only the one registered for the client ID works
+    if RUNS:
+        threading.Thread(target=scheduler, name="scheduler", daemon=True).start()
+        n = pipeline.resume_unfinished()   # searches that were running when the server last stopped
+        if n:
+            print(f"Resuming {n} unfinished search{'es' if n != 1 else ''}.")
     url = f"http://{'localhost' if args.host in ('0.0.0.0', '', '127.0.0.1') else args.host}:{args.port}/"
     print(f"Serving {url}  (Ctrl+C to stop)")
     if not args.no_open:

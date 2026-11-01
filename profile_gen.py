@@ -9,6 +9,8 @@ from __future__ import annotations
 import json
 import re
 
+from scorer import reply_text
+
 CARRY_OVER = ["name", "location", "work_authorization", "security_clearance", "relocation", "do_not_assume", "best_fit_notes"]
 FROM_RESUME = ["headline", "years_experience", "education", "certifications", "strong_skills", "familiar_skills", "achievements"]
 
@@ -35,7 +37,7 @@ def _extract_json(text: str) -> dict:
 def generate(client, model: str, resume_text: str) -> dict:
     msg = client.messages.create(model=model, max_tokens=3000, system=SYSTEM,
                                  messages=[{"role": "user", "content": f"RESUME:\n{resume_text}"}])
-    data = _extract_json(msg.content[0].text)
+    data = _extract_json(reply_text(msg))
     missing = [k for k in FROM_RESUME if k not in data]
     if missing:
         raise ValueError(f"model output missing keys: {missing}")

@@ -15,13 +15,14 @@ import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from urllib.parse import urlparse
 
 import yaml
 
 import db
+import boards
 import discovery
 import feed_sources
 import filters
@@ -88,7 +89,8 @@ def platform_enabled(cfg: dict, name: str) -> bool:
     return bool((cfg.get("platforms") or {}).get(name, True))
 
 
-def collect(cfg: dict, conn=None) -> list[sources.Job]:
+def collect(cfg: dict, conn=None, outcomes: list | None = None) -> list[sources.Job]:
+    """Read every source. When `outcomes` is a list, each board's result is added to it as (system, board, 'ok' | 'gone' | 'error')."""
     delay = cfg.get("request_delay", 0.4)
     src = cfg.get("sources", {})
     jobs: list[sources.Job] = []
@@ -122,14 +124,17 @@ def collect(cfg: dict, conn=None) -> list[sources.Job]:
             else:
                 log(f"  {kind:10s} {slug:18s} {len(got):4d} postings")
         for f in futures:
-            jobs += results[id(f)][2]
-    jobs += collect_workday(cfg, workday, delay)
+            kind, slug, got, err = results[id(f)]
+            jobs += got
+            if outcomes is not None:
+                outcomes.append((kind, slug, boards.status_of(err)))
+    jobs += collect_workday(cfg, workday, delay, outcomes)
     jobs += collect_feeds(cfg, conn)
     jobs += collect_government(cfg)
     return jobs
 
 
-def collect_workday(cfg: dict, entries: list[dict], delay: float) -> list[sources.Job]:
+def collect_workday(cfg: dict, entries: list[dict], delay: float, outcomes: list | None = None) -> list[sources.Job]:
     """Read every Workday site. Sites are different servers, so several are read at once (`workday_workers`, default 16);
     each site is still read one request at a time, with `request_delay` between requests."""
     terms, pages = filters.workday_terms(cfg), cfg.get("workday_max_pages", 3)
@@ -153,7 +158,10 @@ def collect_workday(cfg: dict, entries: list[dict], delay: float) -> list[source
             else:
                 log(f"  workday    {name:18s} {len(got):4d} postings")
         for f in futures:   # keep the order of the list, whatever order the sites finished in
-            jobs += done[id(f)][1]
+            entry, got, err = done[id(f)]
+            jobs += got
+            if outcomes is not None:
+                outcomes.append(("workday", entry, boards.status_of(err)))
     return jobs
 
 
@@ -494,48 +502,41 @@ def cmd_discover(args, cfg, profile, conn) -> None:
     if not total:
         log("\nNothing new to add.")
     elif args.add:
-        discovery.save_discovered(ROOT, found)
-        log(f"\nSaved {total} board(s) to {discovery.DISCOVERED_FILE}. They are searched on the next run.")
+        boards.add(conn, found, "discover")
+        log(f"\nSaved {total} board(s). They are searched on the next run.")
     else:
         log(f"\n{total} new board(s) found, nothing saved. Check the examples above are the right company, "
             f"then run again with --add.")
 
 
 def cmd_crawl(args, cfg, profile, conn) -> None:
-    """Find company boards in bulk from Common Crawl's public web index, check each against the platform's job API, and
-    keep the ones that list a posting matching your titles. Saves only with --add."""
+    """Find company boards in bulk from Common Crawl's public web index, check each against the platform's job API, and keep the
+    ones that list a posting for anyone's titles (yours and every user's). Saves only with --add. The web app also does this by
+    itself every `crawl_every_days` days, and at once when someone saves titles nobody has searched for."""
     import crawl
+    import ingest
 
     systems = [s.strip() for s in args.systems.split(",")] if args.systems else list(crawl.PATTERNS)
     bad = [s for s in systems if s not in crawl.PATTERNS]
     if bad:
         sys.exit(f"Unknown platform(s): {', '.join(bad)}. Choose from: {', '.join(crawl.PATTERNS)}")
-    ids = crawl.resolve_ids(ROOT, args.crawls)
-    if not ids:
+    res = ingest.run_crawl(conn, cfg, ROOT, only_new=False, systems=systems, crawls=args.crawls, keep_all=args.keep_all,
+                           recheck=args.recheck, add=args.add, log=log)
+    if res.get("skipped"):
+        log(f"Nothing done: {res['skipped']}.")
+        return
+    if res["unavailable"]:
         log("Common Crawl's index is not answering right now, so no boards could be looked up. Nothing is wrong with your setup and "
             "nothing was lost. It is a shared free service that sometimes refuses connections for a while after heavy use. "
             "Try again in an hour or so; the command picks up where it stopped.")
         return
-    total, problems = 0, []
-    for system in systems:
-        log(f"\n{system}: reading Common Crawl's index ({args.crawls} recent crawls)...")
-        cands = crawl.enumerate_candidates(ROOT, [system], args.crawls, log, ids=ids, problems=problems)[system]
-        have = crawl.known_keys(cfg.get("sources"), system)
-        ident = crawl._workday_id if system == "workday" else crawl._key
-        fresh = [c for c in cands if ident(c) not in have]
-        log(f"  {len(cands)} boards found, {len(cands) - len(fresh)} already in your sources, {len(fresh)} to check")
-        kept = crawl.validate(system, fresh, cfg, args.keep_all, int(cfg.get("crawl_workers", 16)), log, ROOT, 0 if args.recheck else 14)
-        total += len(kept)
-        if kept and args.add:
-            discovery.save_discovered(ROOT, {system: kept})
-            log(f"  saved {len(kept)} {system} board(s) to {discovery.DISCOVERED_FILE}")
-    if problems:
-        log(f"\nThe index stopped answering while reading: {', '.join(dict.fromkeys(problems))}. Those were only partly read; "
+    if res["problems"]:
+        log(f"\nThe index stopped answering while reading: {', '.join(res['problems'])}. Those were only partly read; "
             f"run the command again later to read the rest.")
     if not args.add:
-        log(f"\n{total} new board(s) found, nothing saved. Run again with --add to keep them (checked boards are remembered, so it is quick).")
+        log(f"\n{res['new']} new board(s) found, nothing saved. Run again with --add to keep them (checked boards are remembered, so it is quick).")
     else:
-        log(f"\nDone: {total} new board(s) saved. They are searched on the next `run`.")
+        log(f"\nDone: {res['new']} new board(s) saved. They are read by the next `fetch`.")
 
 
 def cmd_workday_add(args, cfg, profile, conn) -> None:
@@ -551,8 +552,8 @@ def cmd_workday_add(args, cfg, profile, conn) -> None:
         log(f"Could not read {entry['host']} / {entry['site']} ({type(e).__name__}: {str(e)[:80]}). Nothing saved.")
         return
     log(f"Workday site {entry['host']} / {entry['site']}: {total} postings.")
-    discovery.save_discovered(ROOT, {"workday": [entry]})
-    log(f"Saved as '{entry['name']}' in {discovery.DISCOVERED_FILE} (use --name to change the label).")
+    boards.add(conn, {"workday": [entry]}, "workday-add")
+    log(f"Saved as '{entry['name']}' (use --name to change the label).")
 
 
 def cmd_profile(args, cfg, profile, conn) -> None:
@@ -603,6 +604,57 @@ def cmd_reformat(args, cfg, profile, conn) -> None:
         f"Sources that cannot look up one posting keep their plain text.")
 
 
+def cmd_fetch(args, cfg, profile, conn) -> None:
+    """Read every source once for everyone and keep the postings (see ingest.py). Run it daily from a scheduler. Each user with a search
+    set up is then marked as waiting for a new run, which the web app carries out."""
+    import ingest
+    if args.keep_days:
+        cfg = {**cfg, "keep_postings_days": args.keep_days}
+    stats = ingest.run_fetch(cfg, queue_users=not args.no_queue)
+    if "skipped" in stats:
+        log(f"Nothing done: {stats['skipped']}.")
+        return
+    log(f"\nFetched {stats['fetched']:,} postings: {stats['new']:,} new, {stats['skipped_old']:,} too old to keep. "
+        f"Dropped {stats['purged']:,} nobody lists any more. Queued {stats['queued']} user(s) for a new search. Took {stats['seconds']}s.")
+
+
+def cmd_invite(args, cfg, profile, conn) -> None:
+    """Who may create an account while the site is invite-only (SIGNUP_MODE, default invite). People who already have one are not affected."""
+    import auth
+    if args.action == "add":
+        done = auth.add_invites(conn, args.emails, args.note or "")
+        log(f"Invited {len(done)}: {', '.join(done)}" if done else "Give at least one email address.")
+    elif args.action == "remove":
+        log(f"Removed {auth.remove_invites(conn, args.emails)} invite(s). Anyone who already made an account keeps it.")
+    else:
+        rows = auth.list_invites(conn)
+        for r in rows:
+            log(f"  {r['email']:40s} {'signed up' if r['joined'] else 'not yet'}{'  ' + r['note'] if r['note'] else ''}")
+        log(f"{len(rows)} invite(s), {sum(1 for r in rows if r['joined'])} signed up.")
+
+
+def cmd_usage(args, cfg, profile, conn) -> None:
+    """What the paid calls added up to: for everyone together, and for each person, over the last few days. Counts, and the tokens sent and received."""
+    since = (date.today() - timedelta(days=max(1, args.days) - 1)).isoformat()
+    anon = db.connect(user=False)
+    try:
+        log(f"Everyone, since {since}:")
+        for r in anon.execute("SELECT day, kind, calls FROM usage_totals WHERE day >= ? ORDER BY day DESC, kind", (since,)).fetchall():
+            log(f"  {r['day']}  {r['kind']:8s} {r['calls']:6d} calls")
+        for u in anon.execute("SELECT id, email FROM users ORDER BY id").fetchall():
+            person = db.connect(user=u["id"])   # each person's rows are private, so they are read as that person
+            try:
+                rows = person.execute("SELECT day, kind, calls, tokens_in, tokens_out FROM usage WHERE day >= ? ORDER BY day DESC, kind", (since,)).fetchall()
+            finally:
+                person.close()
+            if rows:
+                log(f"\n{u['email']}:")
+                for r in rows:
+                    log(f"  {r['day']}  {r['kind']:8s} {r['calls']:6d} calls  {r['tokens_in']:>10,} tokens in  {r['tokens_out']:>9,} out")
+    finally:
+        anon.close()
+
+
 def cmd_mark(args, cfg, profile, conn) -> None:
     if args.status not in STATUSES:
         sys.exit(f"status must be one of: {', '.join(sorted(STATUSES))}")
@@ -618,6 +670,15 @@ def main() -> None:
     r = sub.add_parser("run", help="fetch, filter, score, and write a report")
     r.add_argument("--no-llm", action="store_true", help="fetch and filter only (no API calls)")
     r.add_argument("--limit", type=int, help="max LLM scoring calls this run")
+    iv = sub.add_parser("invite", help="choose who may create an account while sign-ups are invite-only")
+    iv.add_argument("action", choices=["add", "remove", "list"])
+    iv.add_argument("emails", nargs="*", help="email addresses")
+    iv.add_argument("--note", help="a reminder of who this is (shown by `invite list`)")
+    us = sub.add_parser("usage", help="what the paid Claude calls added up to, per day and per person")
+    us.add_argument("--days", type=int, default=7, help="how many days back (default 7)")
+    f = sub.add_parser("fetch", help="read every source once for all users and keep the postings (run daily; see ingest.py)")
+    f.add_argument("--no-queue", action="store_true", help="don't mark users as waiting for a new search afterwards")
+    f.add_argument("--keep-days", type=int, help="drop postings nobody has listed for this many days (default 14)")
     l = sub.add_parser("list", help="show top scored jobs from the database")
     l.add_argument("--top", type=int, default=20)
     l.add_argument("--min-score", type=int)
@@ -646,16 +707,17 @@ def main() -> None:
 
     if not (ROOT / "config.yaml").exists():
         sys.exit("config.yaml not found. Copy config.example.yaml to config.yaml, then edit it (see the README).")
-    if not (ROOT / "profile.json").exists():
+    if args.cmd not in ("fetch", "invite", "usage") and not (ROOT / "profile.json").exists():   # the shared fetch is nobody's own
         sys.exit("profile.json not found. Copy profile.example.json to profile.json and fill in the facts a resume can't "
                  "show (citizenship, clearance, do_not_assume), then run: python main.py profile")
-    cfg = discovery.load_config(ROOT)
-    profile = json.loads((ROOT / "profile.json").read_text(encoding="utf-8"))
     load_env()
     conn = db.connect()
+    cfg = discovery.load_config(ROOT, conn)
+    profile = json.loads((ROOT / "profile.json").read_text(encoding="utf-8")) if (ROOT / "profile.json").exists() else {}
     # Every command takes the same four arguments, even those that ignore some of them.
     {"run": cmd_run, "list": cmd_list, "mark": cmd_mark, "profile": cmd_profile,
-     "discover": cmd_discover, "workday-add": cmd_workday_add, "crawl": cmd_crawl, "reformat": cmd_reformat}[args.cmd](args, cfg, profile, conn)
+     "discover": cmd_discover, "workday-add": cmd_workday_add, "crawl": cmd_crawl, "reformat": cmd_reformat,
+     "fetch": cmd_fetch, "invite": cmd_invite, "usage": cmd_usage}[args.cmd](args, cfg, profile, conn)
 
 
 if __name__ == "__main__":

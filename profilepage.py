@@ -108,6 +108,13 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--accent);outline-
 
 <div class="actions"><button class="btn primary" id="save">Save and see my jobs</button><button class="btn" id="skip" hidden>Skip for now</button></div>
 <div class="status" id="save-status" role="status"></div>
+<section id="s-delete" style="margin-top:36px">
+<h2>Delete my account</h2>
+<p class="hint">Deletes your account, resume, profile, jobs, notes and generated files right away. This cannot be undone. See <a href="/privacy">Privacy</a>.</p>
+<label for="del-confirm">Type your email address to confirm</label><input type="text" id="del-confirm" autocomplete="off" spellcheck="false">
+<div class="actions"><button class="btn" id="delete" style="color:var(--bad);border-color:var(--bad)">Delete my account</button></div>
+<div class="status" id="delete-status" role="status"></div>
+</section>
 </main>
 <script>
 const $=s=>document.querySelector(s);
@@ -198,6 +205,10 @@ $("#save").onclick=()=>busy($("#save"),"Saving",async()=>{
   try{const d=await post("/api/profile/save",body);
     if(d.notes&&d.notes.length){say("#save-status",d.notes.join(" "),"ok");setTimeout(()=>location.href="/",3500)}else location.href="/"}
   catch(e){say("#save-status",e.message,"err")}
+});
+$("#delete").onclick=()=>busy($("#delete"),"Deleting",async()=>{
+  try{await post("/api/account/delete",{confirm:$("#del-confirm").value});location.href="/login"}
+  catch(e){say("#delete-status",e.message,"err")}
 });
 $("#skip").onclick=async()=>{try{await post("/api/profile/skip");location.href="/"}catch(e){say("#save-status",e.message,"err")}};
 

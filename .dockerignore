@@ -1,0 +1,24 @@
+# Nothing personal or secret goes into the image: those arrive at run time (see deploy/README.md)
+.git
+.gitignore
+.venv
+__pycache__
+*.pyc
+.env
+.env.*
+config.yaml
+profile.json
+profile.json.bak
+resume.pdf
+resume.txt
+resume.md
+resume/
+Optimized Resumes/
+reports/
+data/
+jobs.db
+crawl_cache.json
+discovered_sources.yaml
+tests/
+deploy/
+*.log

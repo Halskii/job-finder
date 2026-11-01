@@ -23,6 +23,11 @@ Return ONLY a JSON object, no prose, with exactly these keys:
  "reason": "one sentence"}"""
 
 
+def reply_text(msg) -> str:
+    """The text of a model reply. A reply can start with blocks that are not text (the model's thinking), so the first block is not the answer."""
+    return "".join(b.text for b in msg.content if getattr(b, "type", "text") == "text")
+
+
 def _extract_json(text: str) -> dict:
     """The JSON object in the model's reply, tolerating any prose or code fence around it."""
     start, end = text.find("{"), text.rfind("}")
@@ -51,7 +56,7 @@ def score_job(client, model: str, profile: dict, job, min_pay: int, resume_text:
     )
     msg = client.messages.create(model=model, max_tokens=900, system=SYSTEM,
                                  messages=[{"role": "user", "content": user}])
-    data = _extract_json(msg.content[0].text)
+    data = _extract_json(reply_text(msg))
     usage = getattr(msg, "usage", None)
     data["_in"] = int(getattr(usage, "input_tokens", 0) or 0)
     data["_out"] = int(getattr(usage, "output_tokens", 0) or 0)

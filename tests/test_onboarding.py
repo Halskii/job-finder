@@ -281,3 +281,29 @@ class WebTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ThinkingReplyTests(unittest.TestCase):
+    """A model that thinks first sends a block with no text before the answer; the answer is in the text blocks after it."""
+
+    def reply(self, answer):
+        thinking = SimpleNamespace(type="thinking", thinking="let me work this out")   # no .text, like the real block
+        return SimpleNamespace(content=[thinking, SimpleNamespace(type="text", text=json.dumps(answer))], usage=None, stop_reason="end_turn")
+
+    def test_the_resume_facts_are_read_when_the_reply_starts_with_thinking(self):
+        import profile_gen
+        client = SimpleNamespace(messages=SimpleNamespace(create=lambda **kw: self.reply(PROFILE_ANSWER)))
+        self.assertEqual(profile_gen.generate(client, "m", RESUME)["strong_skills"], ["Python", "Java", "Docker"])
+
+    def test_the_whole_analysis_works_when_both_replies_start_with_thinking(self):
+        client = SimpleNamespace(messages=SimpleNamespace(create=lambda **kw: self.reply(
+            SUGGEST_ANSWER if kw["system"].startswith("You help a job seeker") else PROFILE_ANSWER)))
+        out = onboarding.analyze(client, RESUME, "m1", "m2")
+        self.assertEqual(out["suggestions"]["titles"][0], "Backend Software Engineer")
+        self.assertEqual(out["profile"]["headline"], "Software Engineer, 3 years")
+
+    def test_a_job_score_is_read_when_the_reply_starts_with_thinking(self):
+        import scorer
+        client = SimpleNamespace(messages=SimpleNamespace(create=lambda **kw: self.reply({"fit_score": 77, "verdict": "apply"})))
+        job = {"company": "C", "title": "T", "location": "L", "posted": None, "description": "d", "pay_min": None, "pay_max": None, "pay_unit": "year"}
+        self.assertEqual(scorer.score_job(client, "m", {}, job, 0)["fit_score"], 77)

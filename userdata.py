@@ -30,6 +30,13 @@ def home(user_id: int) -> Path:
     return path
 
 
+def delete_home(user_id: int) -> None:
+    """Remove a user's whole folder: their resume, profile, reports and every file made for them."""
+    if not isinstance(user_id, int) or user_id <= 0:
+        raise ValueError("no such user")
+    shutil.rmtree(BASE / str(user_id), ignore_errors=True)
+
+
 def adopt_project_files(user_id: int, source: Path | None = None) -> list[str]:
     """Copy the files of the single-user setup (profile.json, resume, reports, Optimized Resumes) into this user's folder.
     Nothing is overwritten and the originals stay where they are. Returns what was copied."""

@@ -354,7 +354,9 @@ def html_to_pdf(page: str, out: Path) -> None:
         src = Path(tmp) / "page.html"
         src.write_text(page, encoding="utf-8")
         try:
-            subprocess.run([find_browser(), "--headless", "--disable-gpu", "--no-pdf-header-footer",
+            # inside a container the browser cannot start its own sandbox, and /dev/shm is small (CHROME_NO_SANDBOX=1 is set there)
+            sandbox = ["--no-sandbox", "--disable-dev-shm-usage"] if os.environ.get("CHROME_NO_SANDBOX") == "1" else []
+            subprocess.run([find_browser(), "--headless", "--disable-gpu", "--no-pdf-header-footer", *sandbox,
                             f"--user-data-dir={Path(tmp) / 'profile'}", f"--print-to-pdf={out.resolve()}", src.as_uri()],
                            check=True, capture_output=True, timeout=90)
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
