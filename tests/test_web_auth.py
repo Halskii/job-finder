@@ -80,7 +80,9 @@ class SignInTests(Base):
         self.assertNotIn("Secure", cookie)          # plain http on this computer; it is set when served over https
         token = cookie.split(";")[0].split("=", 1)[1]
         self.assertEqual(self.call("GET", "/api/me", cookie=token)[2]["email"], "new@example.com")
-        self.assertEqual(self.call("GET", "/", cookie=token)[0], 200)
+        status, head, _ = self.call("GET", "/", cookie=token)
+        self.assertEqual((status, head["Location"]), (303, "/profile"))      # a new account starts on the profile page
+        self.assertEqual(self.call("GET", "/profile", cookie=token)[0], 200)
         self.assertEqual(self.call("GET", "/login", cookie=token)[0], 303)   # already signed in
 
     def test_the_cookie_is_secure_over_https_or_when_asked(self):

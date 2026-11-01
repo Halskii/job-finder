@@ -194,6 +194,7 @@ How it works:
 - `scoring`: `model`, `max_per_run` (cost cap), `workers` (API calls at the same time, default 8; lower it if you hit rate limits), `report_min_score`, `report_size`, `price_per_million_tokens`
 - `profile_model`: the model used by `main.py profile`
 - `tailor_model`: the model behind the viewer's **Tailor resume + cover letter** button
+- `onboard_model`: the model that suggests job titles on the profile page (default Haiku 5.5)
 - `tips_model`: the model behind the **Interview prep** button (default Haiku 5.5); `tips_web_search` turns its web search on or off
 - On/off switches, one per source type. `platforms:` has a `true`/`false` line for each board platform (`greenhouse`, `lever`, `ashby`, `smartrecruiters`, `workable`, `recruitee`, `bamboohr`, `rippling`, `gem`, `personio`, `workday`). Set one to `false` and a run skips every board of that platform, printing a "turned off" note; the boards stay in your lists, so setting it back to `true` restores them. A platform you leave out is on. A misspelled name is reported, not silently ignored. Aggregator feeds (`feeds.<name>.enabled`) and government sources (`government.<name>.enabled`) have their own `enabled:` switch. These switches only affect `run`; `crawl` and `discover` still look for boards on every platform you ask for.
 - `sources`: company boards to read
@@ -222,6 +223,7 @@ How it works:
 | `migrate_sqlite.py` | One-time copy of an old `jobs.db` (SQLite) into PostgreSQL for one user |
 | `web.py` | The web server (FastAPI): sign-in, the JSON API behind the page, file downloads |
 | `viewer.py` | What the page shows one signed-in user (reports joined to postings, saved, trash, prep, tracker) and the page itself |
+| `onboarding.py`, `profilepage.py` | The profile page: reading a resume to suggest job titles and fill a profile, and checking everything the person edits before it is saved |
 | `auth.py`, `loginpage.py` | Accounts: password hashing, sign-in with a password or Google, sessions, and the sign-in page |
 | `userdata.py`, `claim_local.py` | Each user's own folder under `data/users/<id>/` (profile, resume, reports, made files), and attaching your earlier data to your account |
 | `errors.py` | Errors written for the person using the program, and the translation of every other error into one |
@@ -244,6 +246,7 @@ People sign up with an email and password or with Google, and each account sees 
 - **Passwords** are stored as salted scrypt hashes, at least 10 characters, with a lockout after 8 wrong tries for an email within 15 minutes. **Sessions** are random tokens in an HttpOnly, SameSite cookie (Secure over https); only a hash of the token is stored, and signing out ends it on the server.
 - **Google sign-in** needs an OAuth client ID. In the Google Cloud console create one (type: Web application), add your site's address (`http://localhost:8765` here, your domain later) under **Authorized JavaScript origins**, and put the ID in `.env` as `GOOGLE_CLIENT_ID`. The server verifies Google's signed token itself; no client secret is needed. Email is not confirmed for password sign-ups yet, so if someone later signs in with Google using the same address, any password on that unconfirmed account is removed first.
 - **Your earlier data.** Everything made before accounts belongs to a built-in `local@localhost` account. Run `python claim_local.py you@gmail.com` once: it renames that account to your email (so signing in with Google, or signing up with the same email, lands on it) and copies your profile, resume, reports and Optimized Resumes into `data/users/<your id>/`.
+- **The profile page** (`/profile`, and the **Profile** button in the header) is where a new account starts. The person uploads a resume PDF (up to 5 MB, 12 pages, readable text), or pastes it, or just describes their experience in a few sentences. **Read my resume** makes two Claude calls (about 10 seconds): one suggests 10 to 16 job titles and the title words to skip for their level, the other lists the facts the resume states (skills, education, years). Nothing is saved until they edit it and press **Save**, and a skill they list under "things I do not have" is never kept as a skill. Search limits (minimum pay, posting age, US only, places to skip) are set there too. Settings are saved in `data/users/<id>/settings.json` and the profile in `profile.json`.
 - **Serving it online** needs `ALLOWED_HOSTS` (your domain), and behind HTTPS also `COOKIE_SECURE=1` and `TRUST_PROXY=1`; the template `.env.example` explains each. Not built yet: email confirmation and password reset (they need an email service), and per-user usage limits.
 
 ## Notes
