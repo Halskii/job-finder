@@ -294,3 +294,36 @@ def validate(system: str, cands: list, cfg: dict, keep_all: bool = False, worker
         save_cache(root, cache)
     log(f"  {system:16s} checked {len(todo)} ({skipped} skipped, checked recently): {live_boards} live, {len(kept)} kept")
     return kept
+
+
+def crawl_config(cfg: dict, titles: list[str]) -> dict:
+    """The settings a board is judged by: does it list a posting for any of these titles, in the US. Nobody's own skip-words, places or
+    pay floor apply, because a board is worth keeping when anyone could want a posting on it."""
+    return {**cfg, "titles": titles, "exclude_title_words": [], "exclude_locations": [], "min_pay": 0}
+
+
+def run(conn, cfg: dict, root: Path, titles: list[str], systems: list[str] | None = None, crawls: int = 4, keep_all: bool = False,
+        recheck: bool = False, add: bool = True, log=print) -> dict:
+    """Find boards from Common Crawl's index, check each against the platform's job API, and keep (store in the database, with `add`) those
+    that list a posting matching `titles`. `recheck` asks again about boards that were looked at recently, which is needed when the titles
+    are new. `cfg["sources"]` must already hold the boards that are known, so those are not looked at again.
+    Returns {"new": boards kept, "problems": systems the index stopped answering for, "unavailable": True if it did not answer at all}."""
+    import boards
+    systems = systems or list(PATTERNS)
+    ids = resolve_ids(root, crawls)
+    if not ids:
+        return {"new": 0, "problems": [], "unavailable": True}
+    judge, total, problems = crawl_config(cfg, titles), 0, []
+    for system in systems:
+        log(f"\n{system}: reading Common Crawl's index ({crawls} recent crawls)...")
+        cands = enumerate_candidates(root, [system], crawls, log, ids=ids, problems=problems)[system]
+        have = known_keys(cfg.get("sources"), system)
+        ident = _workday_id if system == "workday" else _key
+        fresh = [c for c in cands if ident(c) not in have]
+        log(f"  {len(cands)} boards found, {len(cands) - len(fresh)} already known, {len(fresh)} to check")
+        kept = validate(system, fresh, judge, keep_all, int(cfg.get("crawl_workers", 16)), log, root, 0 if recheck else 14)
+        total += len(kept)
+        if kept and add:
+            boards.add(conn, {system: kept}, "crawl")
+            log(f"  saved {len(kept)} {system} board(s)")
+    return {"new": total, "problems": list(dict.fromkeys(problems)), "unavailable": False}

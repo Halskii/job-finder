@@ -30,8 +30,8 @@ class Site:
         pgtest.connect(self.schema).close()   # makes the tables
         self._base = mock.patch.object(userdata, "BASE", Path(root) / "users")
         self._base.start()
-        self._saved = (viewer.DB_ARGS, web.RESTORE)
-        viewer.DB_ARGS, web.RESTORE = pgtest.args(self.schema), False
+        self._saved = (viewer.DB_ARGS, web.RESTORE, web.RUNS)
+        viewer.DB_ARGS, web.RESTORE, web.RUNS = pgtest.args(self.schema), False, False   # no background work unless a test asks for it
         conn = db.connect(**{**viewer.DB_ARGS, "user": False})
         try:
             self.user = auth.sign_up(conn, email, PASSWORD, "Test User")
@@ -71,5 +71,5 @@ class Site:
     def stop(self) -> None:
         self.server.should_exit = True
         self.thread.join(timeout=10)
-        viewer.DB_ARGS, web.RESTORE = self._saved
+        viewer.DB_ARGS, web.RESTORE, web.RUNS = self._saved
         self._base.stop()

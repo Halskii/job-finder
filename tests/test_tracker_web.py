@@ -138,7 +138,9 @@ class TrackerWebTests(unittest.TestCase):
     # ---------------------------------------------------------------- changing the date
     def test_change_the_date_moves_it_between_week_month_and_all_time(self):
         self.post("/api/mark", {"id": "greenhouse:stripe:1", "status": "applied"})
-        old = date.today().replace(day=1) - timedelta(days=1)   # last day of the previous month
+        today = date.today()
+        # a day before both this month and this week: the last of last month can still be in this week (on the 1st of a month)
+        old = min(today.replace(day=1), today - timedelta(days=today.weekday())) - timedelta(days=1)
         self.assertEqual(self.post("/api/applied-date", {"id": "greenhouse:stripe:1", "date": old.isoformat()}), (200, {"updated": 1}))
         s = self.get("/api/tracker")[1]["stats"]
         self.assertEqual((s["week"]["applications"], s["month"]["applications"], s["all"]["applications"]), (0, 0, 1))

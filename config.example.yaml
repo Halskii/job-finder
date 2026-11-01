@@ -11,6 +11,10 @@ us_only: true             # drop postings whose location looks outside the US
 exclude_locations: []
 #  - Florida
 #  - FL
+crawl_every_days: 30    # the web app looks for new company boards (for everyone's titles) this often. 0 = only when you run `python main.py crawl --add`
+fetch_every_hours: 0     # the web app reads every source for all users this often (24 = daily). 0 = only when you run `python main.py fetch`
+keep_postings_days: 14   # postings no source has listed for this long are deleted (unless a user has them as one of their jobs)
+store_max_age_days: 90   # postings clearly older than this are not stored at all
 request_delay: 0.4        # seconds between HTTP requests (be polite to job boards)
 
 profile_model: claude-sonnet-5-5   # used by `main.py profile` to read resume.pdf
@@ -21,7 +25,10 @@ tips_web_search: true              # let it search the web for what candidates r
 
 scoring:
   model: claude-haiku-4-5-20251001   # cheap first pass; switch to claude-sonnet-5-5 for deeper analysis
-  max_per_run: 40                    # cap LLM calls per run to control cost
+  max_per_run: 40                    # cap LLM calls per `main.py run` to control cost
+  initial_batch: 50                  # the web app scores this many of a user's best matches at once, so there is something to read straight away
+  batch_size: 50                     # then keeps going in background batches of this size
+  max_per_user_per_day: 400          # paid scoring calls one user can use in a day; the rest wait until tomorrow
   workers: 8                          # scoring calls made at the same time (lower this if you see rate-limit errors)
   report_min_score: 60               # only show jobs scoring at least this in the report
   report_size: 1000

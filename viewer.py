@@ -144,6 +144,17 @@ def load_saved(uid: int) -> dict:
         conn.close()
 
 
+def load_matches(uid: int) -> dict:
+    """The jobs that fit this user's search and scored well, best first: the live list, shaped like a report."""
+    scoring = tailor.config_value("scoring", {}) or {}
+    conn = _db(uid)
+    try:
+        rows = db.top(conn, int(scoring.get("report_size", 1000)), int(scoring.get("report_min_score", 60)))
+        return {"title": "Your matches", "jobs": [job_dict(r) for r in rows]}
+    finally:
+        conn.close()
+
+
 def load_trash(uid: int) -> dict:
     """The jobs you discarded, shaped like a report."""
     conn = _db(uid)
@@ -321,6 +332,8 @@ nav{width:340px;flex:none;border-right:1px solid var(--line);background:var(--pa
 nav header{padding:12px;border-bottom:1px solid var(--line);display:grid;gap:8px}
 nav select,nav input{width:100%;padding:7px 9px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink);font:inherit}
 #list{overflow:auto;flex:1}
+#progress{padding:9px 12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--mute);display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+#progress[hidden]{display:none}#progress.err{color:var(--bad)}#progress .link{background:none;border:0;color:var(--accent);font:inherit;padding:0;cursor:pointer;text-decoration:underline}
 .item{display:flex;gap:10px;padding:10px 12px;border-bottom:1px solid var(--line);cursor:pointer;text-decoration:none;color:inherit}
 .item:hover{background:var(--bg)}.item.sel{background:var(--bg);box-shadow:inset 3px 0 var(--accent)}
 .score{flex:none;width:38px;height:38px;border-radius:8px;display:grid;place-items:center;font-weight:700;border:1.5px solid var(--mute)}
@@ -409,7 +422,7 @@ td.actions-cell .btn{display:block;width:100%;padding:4px 8px;margin:0 0 4px}td.
 }
 @media (max-width:760px){body{flex-direction:column;height:auto}nav{width:auto;max-height:45vh}main{padding:52px 16px 16px}}
 </style></head><body>
-<nav><header><div class="tabs"><a class="tab" id="tab-matches" href="#">Matches</a><a class="tab" id="tab-saved" href="#saved">Saved <span id="scount"></span></a><a class="tab" id="tab-prep" href="#prep">Interview Prep <span id="pcount"></span></a><a class="tab" id="tab-tracker" href="#tracker">Tracker <span id="tcount"></span></a></div><select id="report" aria-label="Report"></select><input id="q" placeholder="Filter by title or company" aria-label="Filter"></header><div id="list"></div></nav>
+<nav><header><div class="tabs"><a class="tab" id="tab-matches" href="#">Matches</a><a class="tab" id="tab-saved" href="#saved">Saved <span id="scount"></span></a><a class="tab" id="tab-prep" href="#prep">Interview Prep <span id="pcount"></span></a><a class="tab" id="tab-tracker" href="#tracker">Tracker <span id="tcount"></span></a></div><select id="report" aria-label="Report"></select><input id="q" placeholder="Filter by title or company" aria-label="Filter"></header><div id="progress" hidden></div><div id="list"></div></nav>
 <div id="toasts" role="status" aria-live="polite"></div>
 <dialog id="confirm-dlg" aria-labelledby="confirm-title" aria-describedby="confirm-msg"><h3 id="confirm-title"></h3><p id="confirm-msg"></p>
 <div class="actions"><button class="btn" id="confirm-cancel"></button><button class="btn" id="confirm-ok"></button></div></dialog>
@@ -489,8 +502,8 @@ function ask({title,message,confirmText="OK",cancelText="Cancel",danger=false}){
 addEventListener("unhandledrejection",e=>{e.preventDefault();console.error(e.reason);toast("Something went wrong",friendly(e.reason))});
 addEventListener("error",e=>{console.error(e.error||e.message);toast("Something went wrong","The page ran into a problem. If it keeps happening, reload it.")});
 
-const SAVED="__saved__",PREP="__prep__",TRASH="__trash__";   // the report menu's entries for jobs you saved and jobs with interview prep, from any report
-const EMPTY={[SAVED]:"Nothing saved yet. Open a job and click Save for later.",[PREP]:"No interview prep yet. Open a job and click Interview prep.",[TRASH]:"The trash is empty. Jobs you discard show up here."};
+const MATCHES="__matches__",SAVED="__saved__",PREP="__prep__",TRASH="__trash__";   // the report menu's entries for jobs you saved and jobs with interview prep, from any report
+const EMPTY={[MATCHES]:"No matches to show yet. They appear here as they are scored.",[SAVED]:"Nothing saved yet. Open a job and click Save for later.",[PREP]:"No interview prep yet. Open a job and click Interview prep.",[TRASH]:"The trash is empty. Jobs you discard show up here."};
 let reportNames=[],savedCount=0,prepCount=0,trashCount=0;
 function markTabs(inTracker){   // which of the four tabs is lit
   $("#tab-tracker").classList.toggle("on",inTracker);
@@ -503,7 +516,7 @@ function fillReportMenu(){
   $("#report").replaceChildren(el("option",{value:SAVED,textContent:"★ Saved jobs"+(savedCount?" ("+savedCount+")":"")}),
     el("option",{value:PREP,textContent:"Interview Prep"+(prepCount?" ("+prepCount+")":"")}),
     el("option",{value:TRASH,textContent:"Trash"+(trashCount?" ("+trashCount+")":"")}),
-    ...reportNames.map(n=>el("option",{value:n,textContent:n.replace(/\.md$/,"")})));
+    ...reportNames.map(n=>el("option",{value:n,textContent:n===MATCHES?"Current matches":n.replace(/\.md$/,"")})));
   $("#report").value=reportName||reportNames[0]||SAVED;
 }
 async function refreshTrash(){
@@ -522,7 +535,7 @@ async function refreshSaved(){
   fillReportMenu();
 }
 async function loadReports(){
-  reportNames=await api("/api/reports");
+  reportNames=[MATCHES,...await api("/api/reports")];   // the live list first, then the reports written earlier
   $("#report").onchange=()=>openReport($("#report").value);
   await refreshSaved();refreshPrep();refreshTrash();
   if(!reportNames.length&&!savedCount){$("#list").replaceChildren(el("div",{className:"empty",textContent:"No reports yet. Run: python main.py run"}));return}
@@ -530,7 +543,7 @@ async function loadReports(){
 }
 async function openReport(name){
   reportName=name;$("#report").value=name;
-  const data=await api(name===SAVED?"/api/saved":name===PREP?"/api/prep":name===TRASH?"/api/trash":"/api/report/"+encodeURIComponent(name));
+  const data=await api(name===MATCHES?"/api/matches":name===SAVED?"/api/saved":name===PREP?"/api/prep":name===TRASH?"/api/trash":"/api/report/"+encodeURIComponent(name));
   jobs=data.jobs;renderList();route();
 }
 function hiddenFromList(j){   // discarded jobs live in the trash, saved ones in the Saved tab, applied ones in the tracker
@@ -631,7 +644,7 @@ async function setStatus(j,status,explicit){
     j.status=status;j.applied_at=res.applied_at;
     if(reportName===SAVED)jobs=jobs.filter(x=>x.status==="saved");   // a job you unsave or act on leaves the Saved list
     if(reportName===TRASH)jobs=jobs.filter(x=>x.status==="skipped");   // a job you restore leaves the trash
-    const next=at>=0&&(!jobs.includes(j)||hiddenFromList(j))?(ids[at+1]||ids[at-1]):undefined;   // it left the list: move on to the neighbouring job
+    const next=status!=="saved"&&at>=0&&(!jobs.includes(j)||hiddenFromList(j))?(ids[at+1]||ids[at-1]):undefined;   // it left the list: move on to the neighbouring job, except after saving one: stay, so the filled bookmark shows
     renderList();
     if(next)location.hash="#"+encodeURIComponent(next);else route();
     refreshTracker();refreshSaved();refreshTrash();
@@ -683,6 +696,28 @@ async function tailorJob(j,resume_request,letter_request){
   tailorState[j.id]={running:false,message,files,warning};paintTailor(j.id);
 }
 async function reloadJobs(){if(reportName)await openReport(reportName)}
+let lastScored=-1,pollTimer=0;
+function paintProgress(s){
+  const box=$("#progress");
+  box.className=s.state==="error"?"err":"";
+  const again=el("button",{className:"link",textContent:"Check for new jobs",onclick:async()=>{try{paintProgress(await post("/api/matches/refresh",{}));pollProgress()}catch(e){fail("Couldn't start the search",e)}}});
+  if(s.state==="queued"||s.state==="matching"){box.replaceChildren(el("span",{className:"spinner"}),el("span",{textContent:"Finding jobs that fit your search..."}))}
+  else if(s.state==="scoring"){box.replaceChildren(el("span",{className:"spinner"}),el("span",{textContent:"Scoring your matches: "+s.scored+" done, "+s.waiting+" to go. The best ones come first."}))}
+  else if(s.state==="error"){box.replaceChildren(s.message||"Something went wrong while scoring.",again)}
+  else if(s.message){box.replaceChildren(s.message,again)}
+  else if(s.matched===0&&s.state!=="idle"){box.replaceChildren("No postings fit your search yet. ",el("a",{href:"/profile",textContent:"Change your search",style:"color:var(--accent)"}))}
+  else{box.replaceChildren(again)}
+  box.hidden=false;
+}
+async function pollProgress(){
+  clearTimeout(pollTimer);
+  let s;try{s=await api("/api/matches/status")}catch(e){return}
+  paintProgress(s);
+  if(lastScored>=0&&s.scored!==lastScored&&reportName===MATCHES&&!$("#q").value)await reloadJobs();   // a batch finished: show the new matches
+  lastScored=s.scored;
+  if(["queued","matching","scoring"].includes(s.state))pollTimer=setTimeout(pollProgress,3500);
+  else if(reportName===MATCHES&&s.scored>0&&!jobs.length)await reloadJobs();
+}
 async function refreshTracker(){
   try{
     tracker=await api("/api/tracker");
@@ -894,6 +929,7 @@ api("/api/me").then(me=>{
   box.hidden=false;
 }).catch(()=>{});
 refreshTracker();
+pollProgress();
 loadReports().catch(e=>{console.error(e);$("#main").replaceChildren(el("div",{className:"empty"},"We couldn't load your jobs. "+friendly(e),
   el("div",{className:"row",style:"justify-content:center"},el("button",{className:"btn",textContent:"Try again",onclick:()=>location.reload()}))))});
 </script></body></html>

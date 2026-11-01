@@ -12,6 +12,7 @@ import queue
 import re
 import sys
 import threading
+import time
 import webbrowser
 from pathlib import Path
 from urllib.parse import urlparse
@@ -24,6 +25,7 @@ import auth
 import db
 import loginpage
 import onboarding
+import pipeline
 import profilepage
 import reformat
 import tailor
@@ -36,11 +38,13 @@ log = logging.getLogger("job-finder")
 COOKIE = "session"
 MAX_BODY = 40_000          # room for two 2,000-character requests, even all non-ASCII
 MAX_UPLOAD = userdata.MAX_RESUME_BYTES
+RUNS = True                # find and score a user's matches in the background after they save their search
 RESTORE = True             # restore the formatting of older postings in the background (python web.py --no-restore turns it off)
 FILE_NAME = re.compile(r"^[A-Za-z0-9_.\-]{1,200}\.(pdf|docx)$")
 MEDIA = {".pdf": "application/pdf", ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"}
 
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)   # no public API documentation page
+pipeline.connect_as = lambda uid: viewer._db(uid) if uid is not False else auth_db()   # the background worker uses the same database
 
 
 class Problem(Exception):
@@ -342,6 +346,8 @@ def save_profile(body: dict = Depends(json_body), user: dict = Depends(current_u
         raise Problem(400, "Add at least one job title to search for.", "invalid")
     userdata.save_settings(uid, settings)
     userdata.save_profile(uid, profile)
+    start_run(uid)   # their search is saved: look for jobs that fit it
+    WAKE.set()       # and, if the titles are new to the crawl, find boards for them now
     return {"settings": settings, "profile": profile, "notes": notes}
 
 
@@ -370,6 +376,37 @@ def report(name: str, user: dict = Depends(current_user)):
     if data is None:
         raise Problem(404, "That report does not exist.", "not_found")
     return data
+
+
+@app.get("/api/matches")
+def matches(user: dict = Depends(current_user)):
+    return viewer.load_matches(user["id"])
+
+
+@app.get("/api/matches/status")
+def matches_status(user: dict = Depends(current_user)):
+    conn = viewer._db(user["id"])
+    try:
+        return pipeline.status(conn)
+    finally:
+        conn.close()
+
+
+@app.post("/api/matches/refresh")
+def matches_refresh(user: dict = Depends(current_user)):
+    """Look for new jobs that fit this person's search, and score them."""
+    return start_run(user["id"])
+
+
+def start_run(uid: int) -> dict:
+    """Queue a run for this user and return their status (which says 'queued' at once)."""
+    if RUNS:
+        pipeline.request(uid)
+    conn = viewer._db(uid)
+    try:
+        return pipeline.status(conn)
+    finally:
+        conn.close()
 
 
 @app.get("/api/tracker")
@@ -501,6 +538,48 @@ def tips_(body: dict = Depends(json_body), user: dict = Depends(current_user)):
 
 # ---------------------------------------------------------------- start-up
 
+WAKE = threading.Event()   # set when something happened that the scheduler should look at now, not at its next minute (a saved profile)
+
+
+def scheduler() -> None:
+    """Runs for as long as the server does. Every minute (or at once when woken): hands the worker any user marked as waiting (the
+    daily fetch may have run in another process), and does whatever shared upkeep is due, one thing at a time, in the background:
+    boards for titles nobody has searched yet (at once), the monthly crawl for new boards (`crawl_every_days`, default 30), and the
+    shared fetch of every posting (`fetch_every_hours`, default 0 = only when `main.py fetch` is run)."""
+    import discovery
+    import ingest
+    import main as program
+    busy = threading.Event()
+
+    def work(job: str) -> None:
+        try:
+            result = ingest.run_job(job, connect=pipeline._connect)
+            print(f"Upkeep ({job}) done: {result}", flush=True)
+        except Exception as ex:
+            log.warning("Upkeep (%s) stopped: %s", job, ex)
+        finally:
+            busy.clear()
+
+    while True:
+        try:
+            pipeline.poll_queued()
+            if not busy.is_set():
+                conn = pipeline._connect(False)
+                try:
+                    cfg = discovery.load_config(program.ROOT, conn)
+                    job = ingest.next_job(conn, cfg, float(tailor.config_value("crawl_every_days", 30) or 0),
+                                          float(tailor.config_value("fetch_every_hours", 0) or 0))
+                finally:
+                    conn.close()
+                if job:
+                    busy.set()
+                    threading.Thread(target=work, args=(job,), name=job, daemon=True).start()
+        except Exception as ex:   # a database hiccup must not end the scheduler
+            log.warning("Scheduler: %s", ex)
+        WAKE.wait(60)
+        WAKE.clear()
+
+
 def main() -> None:
     global RESTORE
     import main as program
@@ -519,6 +598,11 @@ def main() -> None:
     except Exception as ex:
         sys.exit(f"Could not open the database: {ex}\nCheck DATABASE_URL in the .env file and that PostgreSQL is running.")
     # "localhost", not 127.0.0.1: Google treats them as different origins and only the one registered for the client ID works
+    if RUNS:
+        threading.Thread(target=scheduler, name="scheduler", daemon=True).start()
+        n = pipeline.resume_unfinished()   # searches that were running when the server last stopped
+        if n:
+            print(f"Resuming {n} unfinished search{'es' if n != 1 else ''}.")
     url = f"http://{'localhost' if args.host in ('0.0.0.0', '', '127.0.0.1') else args.host}:{args.port}/"
     print(f"Serving {url}  (Ctrl+C to stop)")
     if not args.no_open:

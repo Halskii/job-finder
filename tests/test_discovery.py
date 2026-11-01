@@ -10,6 +10,7 @@ from unittest import mock
 
 import db
 from tests import pgtest
+import boards
 import discovery
 import main
 import sources
@@ -268,47 +269,49 @@ class CommandTests(unittest.TestCase):
         (self.root / "config.yaml").write_text(CONFIG, encoding="utf-8")
         self.saved_root, main.ROOT = main.ROOT, self.root
         self.cfg = discovery.load_config(self.root)
+        self.conn = pgtest.connect()
 
     def tearDown(self):
         main.ROOT = self.saved_root
+        self.conn.close()
         self.tmp.cleanup()
 
     def run_discover(self, names, add):
         hit = discovery.Hit("greenhouse", "reddit", [job("1", "greenhouse", "reddit", "Software Engineer")])
         known = discovery.Hit("greenhouse", "stripe", [job("2", "greenhouse", "stripe", "Software Engineer")])
         with mock.patch.object(discovery, "probe", side_effect=lambda name, delay: {"Reddit": [hit], "Stripe": [known]}.get(name, [])):
-            main.cmd_discover(argparse.Namespace(names=names, file=None, add=add), self.cfg, {}, None)
+            main.cmd_discover(argparse.Namespace(names=names, file=None, add=add), self.cfg, {}, self.conn)
 
     def test_without_add_nothing_is_saved(self):
         self.run_discover(["Reddit"], add=False)
-        self.assertFalse((self.root / discovery.DISCOVERED_FILE).exists())
+        self.assertEqual(boards.load(self.conn), {})
 
     def test_add_saves_new_boards_but_not_known_ones(self):
         self.run_discover(["Reddit", "Stripe", "Nobody"], add=True)
-        self.assertEqual(discovery.load_discovered(self.root), {"greenhouse": ["reddit"]})
+        self.assertEqual(boards.load(self.conn), {"greenhouse": ["reddit"]})
 
     def test_names_file_skips_blanks_and_comments(self):
         (self.root / "companies.txt").write_text("# my list\nReddit\n\n  Stripe  \n", encoding="utf-8")
         seen = []
         with mock.patch.object(discovery, "probe", side_effect=lambda name, delay: seen.append(name) or []):
-            main.cmd_discover(argparse.Namespace(names=["Zed"], file=str(self.root / "companies.txt"), add=False), self.cfg, {}, None)
+            main.cmd_discover(argparse.Namespace(names=["Zed"], file=str(self.root / "companies.txt"), add=False), self.cfg, {}, self.conn)
         self.assertEqual(seen, ["Zed", "Reddit", "Stripe"])
 
     def test_workday_add_saves_only_after_a_successful_check(self):
         url = "https://acme.wd1.myworkdayjobs.com/en-US/Acme_Careers/job/x"
         with mock.patch.object(discovery, "check_workday", side_effect=RuntimeError("404")):
-            main.cmd_workday_add(argparse.Namespace(url=url, name=None), self.cfg, {}, None)
-        self.assertFalse((self.root / discovery.DISCOVERED_FILE).exists())
+            main.cmd_workday_add(argparse.Namespace(url=url, name=None), self.cfg, {}, self.conn)
+        self.assertEqual(boards.load(self.conn), {})
         with mock.patch.object(discovery, "check_workday", return_value=42):
-            main.cmd_workday_add(argparse.Namespace(url=url, name="Acme Corp"), self.cfg, {}, None)
-        saved = discovery.load_discovered(self.root)["workday"]
+            main.cmd_workday_add(argparse.Namespace(url=url, name="Acme Corp"), self.cfg, {}, self.conn)
+        saved = boards.load(self.conn)["workday"]
         self.assertEqual(saved, [{"name": "Acme Corp", "host": "acme.wd1.myworkdayjobs.com", "tenant": "acme", "site": "Acme_Careers"}])
 
     def test_workday_add_rejects_a_bad_address(self):
         with mock.patch.object(discovery, "check_workday") as chk:
-            main.cmd_workday_add(argparse.Namespace(url="https://example.com", name=None), self.cfg, {}, None)
+            main.cmd_workday_add(argparse.Namespace(url="https://example.com", name=None), self.cfg, {}, self.conn)
             chk.assert_not_called()
-        self.assertFalse((self.root / discovery.DISCOVERED_FILE).exists())
+        self.assertEqual(boards.load(self.conn), {})
 
 
 if __name__ == "__main__":

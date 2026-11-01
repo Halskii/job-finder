@@ -48,6 +48,10 @@ CREATE TABLE IF NOT EXISTS postings (
   fetched_at DOUBLE PRECISION, last_seen DOUBLE PRECISION
 );
 CREATE INDEX IF NOT EXISTS postings_dedupe ON postings (dedupe_key);
+ALTER TABLE postings ADD COLUMN IF NOT EXISTS detail TEXT;                              -- JSON: what a source needs to read the full posting later
+ALTER TABLE postings ADD COLUMN IF NOT EXISTS detail_tries INTEGER NOT NULL DEFAULT 0;  -- failed attempts to read it; after a few it is left alone
+CREATE INDEX IF NOT EXISTS postings_last_seen ON postings (last_seen);
+CREATE INDEX IF NOT EXISTS postings_fetched ON postings (fetched_at);
 
 CREATE TABLE IF NOT EXISTS user_jobs (
   user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -65,6 +69,33 @@ CREATE TABLE IF NOT EXISTS interview_tips (
   user_id BIGINT NOT NULL, job_id TEXT NOT NULL, content TEXT NOT NULL, model TEXT, created TEXT,
   PRIMARY KEY (user_id, job_id),
   FOREIGN KEY (user_id, job_id) REFERENCES user_jobs (user_id, job_id) ON DELETE CASCADE
+);
+
+-- Company job boards found by `main.py crawl`, `discover` and `workday-add`, shared by everyone. `fails` counts fetches in a row that found
+-- the board gone, and a board is dropped after a few.
+CREATE TABLE IF NOT EXISTS boards (
+  system TEXT NOT NULL, ident TEXT NOT NULL, entry TEXT NOT NULL,   -- entry: JSON, the board's name on its site, or a Workday site's details
+  added DOUBLE PRECISION NOT NULL, fails INTEGER NOT NULL DEFAULT 0, last_ok DOUBLE PRECISION, origin TEXT NOT NULL DEFAULT 'crawl',
+  PRIMARY KEY (system, ident)
+);
+-- Where each user's matching and scoring has got to. Only counters and a state word, so it has no row-level security: the background
+-- worker has to see every user's row to pick up unfinished work, and the web app always filters by the signed-in user.
+CREATE TABLE IF NOT EXISTS user_runs (
+  user_id BIGINT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  state TEXT NOT NULL DEFAULT 'idle',            -- idle, queued, matching, scoring, done, error
+  message TEXT NOT NULL DEFAULT '',
+  matched INTEGER NOT NULL DEFAULT 0,            -- postings that fit this user's search, all time
+  waiting INTEGER NOT NULL DEFAULT 0,            -- of those, not scored yet
+  scored INTEGER NOT NULL DEFAULT 0,             -- scored in the current run
+  settings_key TEXT,                             -- which version of the search the postings were last checked against
+  watermark DOUBLE PRECISION,                    -- postings fetched after this have not been checked yet
+  updated DOUBLE PRECISION NOT NULL DEFAULT 0
+);
+-- What each user's paid calls add up to, per day and kind of call (scoring, ...), for limits and for knowing what a user costs.
+CREATE TABLE IF NOT EXISTS usage (
+  user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE, day TEXT NOT NULL, kind TEXT NOT NULL,
+  calls INTEGER NOT NULL DEFAULT 0, tokens_in BIGINT NOT NULL DEFAULT 0, tokens_out BIGINT NOT NULL DEFAULT 0,
+  PRIMARY KEY (user_id, day, kind)
 );
 
 CREATE OR REPLACE VIEW jobs WITH (security_invoker = true) AS
@@ -94,7 +125,7 @@ CREATE TRIGGER jobs_update INSTEAD OF UPDATE ON jobs FOR EACH ROW EXECUTE FUNCTI
 """
 
 # Tables a user owns. Each gets a policy that only lets a connection see and write the rows of the user it was opened for.
-PRIVATE_TABLES = ("user_jobs", "interview_rounds", "interview_tips")
+PRIVATE_TABLES = ("user_jobs", "interview_rounds", "interview_tips", "usage")
 _OWN_ROWS = "user_id = nullif(current_setting('app.user_id', true), '')::bigint"
 
 
@@ -133,6 +164,15 @@ class Conn:
     def execute(self, sql: str, args=()):
         try:
             return self.raw.execute(sql.replace("%", "%%").replace("?", "%s"), tuple(args))
+        except Exception:
+            self.raw.rollback()
+            raise
+
+    def executemany(self, sql: str, rows) -> None:
+        """One statement for many rows, sent together (much faster than one by one)."""
+        try:
+            with self.raw.cursor() as cur:
+                cur.executemany(sql.replace("%", "%%").replace("?", "%s"), [tuple(r) for r in rows])
         except Exception:
             self.raw.rollback()
             raise
@@ -413,3 +453,22 @@ def application_stats(conn, today: date | None = None) -> dict:
         "month": {"label": month_start.strftime("%B %Y"), **count(month_start, next_month)},
         "all": count(),
     }
+
+
+def add_usage(conn, kind: str, calls: int = 1, tokens_in: int = 0, tokens_out: int = 0) -> None:
+    """Add to today's total of paid calls of one kind for this user."""
+    conn.execute("INSERT INTO usage (user_id, day, kind, calls, tokens_in, tokens_out) VALUES (?, ?, ?, ?, ?, ?)"
+                 " ON CONFLICT (user_id, day, kind) DO UPDATE SET calls = usage.calls + excluded.calls,"
+                 " tokens_in = usage.tokens_in + excluded.tokens_in, tokens_out = usage.tokens_out + excluded.tokens_out",
+                 (conn.user_id, date.today().isoformat(), kind, calls, tokens_in, tokens_out))
+    conn.commit()
+
+
+def usage_today(conn, kind: str) -> int:
+    """How many paid calls of this kind this user has made today."""
+    row = conn.execute("SELECT calls FROM usage WHERE day = ? AND kind = ?", (date.today().isoformat(), kind)).fetchone()
+    return row["calls"] if row else 0
+
+
+def unscored_count(conn) -> int:
+    return conn.execute("SELECT COUNT(*) AS n FROM jobs WHERE score IS NULL AND status = 'new'").fetchone()["n"]

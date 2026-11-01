@@ -22,6 +22,7 @@ from urllib.parse import urlparse
 import yaml
 
 import db
+import boards
 import discovery
 import feed_sources
 import filters
@@ -88,7 +89,8 @@ def platform_enabled(cfg: dict, name: str) -> bool:
     return bool((cfg.get("platforms") or {}).get(name, True))
 
 
-def collect(cfg: dict, conn=None) -> list[sources.Job]:
+def collect(cfg: dict, conn=None, outcomes: list | None = None) -> list[sources.Job]:
+    """Read every source. When `outcomes` is a list, each board's result is added to it as (system, board, 'ok' | 'gone' | 'error')."""
     delay = cfg.get("request_delay", 0.4)
     src = cfg.get("sources", {})
     jobs: list[sources.Job] = []
@@ -122,14 +124,17 @@ def collect(cfg: dict, conn=None) -> list[sources.Job]:
             else:
                 log(f"  {kind:10s} {slug:18s} {len(got):4d} postings")
         for f in futures:
-            jobs += results[id(f)][2]
-    jobs += collect_workday(cfg, workday, delay)
+            kind, slug, got, err = results[id(f)]
+            jobs += got
+            if outcomes is not None:
+                outcomes.append((kind, slug, boards.status_of(err)))
+    jobs += collect_workday(cfg, workday, delay, outcomes)
     jobs += collect_feeds(cfg, conn)
     jobs += collect_government(cfg)
     return jobs
 
 
-def collect_workday(cfg: dict, entries: list[dict], delay: float) -> list[sources.Job]:
+def collect_workday(cfg: dict, entries: list[dict], delay: float, outcomes: list | None = None) -> list[sources.Job]:
     """Read every Workday site. Sites are different servers, so several are read at once (`workday_workers`, default 16);
     each site is still read one request at a time, with `request_delay` between requests."""
     terms, pages = filters.workday_terms(cfg), cfg.get("workday_max_pages", 3)
@@ -153,7 +158,10 @@ def collect_workday(cfg: dict, entries: list[dict], delay: float) -> list[source
             else:
                 log(f"  workday    {name:18s} {len(got):4d} postings")
         for f in futures:   # keep the order of the list, whatever order the sites finished in
-            jobs += done[id(f)][1]
+            entry, got, err = done[id(f)]
+            jobs += got
+            if outcomes is not None:
+                outcomes.append(("workday", entry, boards.status_of(err)))
     return jobs
 
 
@@ -494,48 +502,41 @@ def cmd_discover(args, cfg, profile, conn) -> None:
     if not total:
         log("\nNothing new to add.")
     elif args.add:
-        discovery.save_discovered(ROOT, found)
-        log(f"\nSaved {total} board(s) to {discovery.DISCOVERED_FILE}. They are searched on the next run.")
+        boards.add(conn, found, "discover")
+        log(f"\nSaved {total} board(s). They are searched on the next run.")
     else:
         log(f"\n{total} new board(s) found, nothing saved. Check the examples above are the right company, "
             f"then run again with --add.")
 
 
 def cmd_crawl(args, cfg, profile, conn) -> None:
-    """Find company boards in bulk from Common Crawl's public web index, check each against the platform's job API, and
-    keep the ones that list a posting matching your titles. Saves only with --add."""
+    """Find company boards in bulk from Common Crawl's public web index, check each against the platform's job API, and keep the
+    ones that list a posting for anyone's titles (yours and every user's). Saves only with --add. The web app also does this by
+    itself every `crawl_every_days` days, and at once when someone saves titles nobody has searched for."""
     import crawl
+    import ingest
 
     systems = [s.strip() for s in args.systems.split(",")] if args.systems else list(crawl.PATTERNS)
     bad = [s for s in systems if s not in crawl.PATTERNS]
     if bad:
         sys.exit(f"Unknown platform(s): {', '.join(bad)}. Choose from: {', '.join(crawl.PATTERNS)}")
-    ids = crawl.resolve_ids(ROOT, args.crawls)
-    if not ids:
+    res = ingest.run_crawl(conn, cfg, ROOT, only_new=False, systems=systems, crawls=args.crawls, keep_all=args.keep_all,
+                           recheck=args.recheck, add=args.add, log=log)
+    if res.get("skipped"):
+        log(f"Nothing done: {res['skipped']}.")
+        return
+    if res["unavailable"]:
         log("Common Crawl's index is not answering right now, so no boards could be looked up. Nothing is wrong with your setup and "
             "nothing was lost. It is a shared free service that sometimes refuses connections for a while after heavy use. "
             "Try again in an hour or so; the command picks up where it stopped.")
         return
-    total, problems = 0, []
-    for system in systems:
-        log(f"\n{system}: reading Common Crawl's index ({args.crawls} recent crawls)...")
-        cands = crawl.enumerate_candidates(ROOT, [system], args.crawls, log, ids=ids, problems=problems)[system]
-        have = crawl.known_keys(cfg.get("sources"), system)
-        ident = crawl._workday_id if system == "workday" else crawl._key
-        fresh = [c for c in cands if ident(c) not in have]
-        log(f"  {len(cands)} boards found, {len(cands) - len(fresh)} already in your sources, {len(fresh)} to check")
-        kept = crawl.validate(system, fresh, cfg, args.keep_all, int(cfg.get("crawl_workers", 16)), log, ROOT, 0 if args.recheck else 14)
-        total += len(kept)
-        if kept and args.add:
-            discovery.save_discovered(ROOT, {system: kept})
-            log(f"  saved {len(kept)} {system} board(s) to {discovery.DISCOVERED_FILE}")
-    if problems:
-        log(f"\nThe index stopped answering while reading: {', '.join(dict.fromkeys(problems))}. Those were only partly read; "
+    if res["problems"]:
+        log(f"\nThe index stopped answering while reading: {', '.join(res['problems'])}. Those were only partly read; "
             f"run the command again later to read the rest.")
     if not args.add:
-        log(f"\n{total} new board(s) found, nothing saved. Run again with --add to keep them (checked boards are remembered, so it is quick).")
+        log(f"\n{res['new']} new board(s) found, nothing saved. Run again with --add to keep them (checked boards are remembered, so it is quick).")
     else:
-        log(f"\nDone: {total} new board(s) saved. They are searched on the next `run`.")
+        log(f"\nDone: {res['new']} new board(s) saved. They are read by the next `fetch`.")
 
 
 def cmd_workday_add(args, cfg, profile, conn) -> None:
@@ -551,8 +552,8 @@ def cmd_workday_add(args, cfg, profile, conn) -> None:
         log(f"Could not read {entry['host']} / {entry['site']} ({type(e).__name__}: {str(e)[:80]}). Nothing saved.")
         return
     log(f"Workday site {entry['host']} / {entry['site']}: {total} postings.")
-    discovery.save_discovered(ROOT, {"workday": [entry]})
-    log(f"Saved as '{entry['name']}' in {discovery.DISCOVERED_FILE} (use --name to change the label).")
+    boards.add(conn, {"workday": [entry]}, "workday-add")
+    log(f"Saved as '{entry['name']}' (use --name to change the label).")
 
 
 def cmd_profile(args, cfg, profile, conn) -> None:
@@ -603,6 +604,20 @@ def cmd_reformat(args, cfg, profile, conn) -> None:
         f"Sources that cannot look up one posting keep their plain text.")
 
 
+def cmd_fetch(args, cfg, profile, conn) -> None:
+    """Read every source once for everyone and keep the postings (see ingest.py). Run it daily from a scheduler. Each user with a search
+    set up is then marked as waiting for a new run, which the web app carries out."""
+    import ingest
+    if args.keep_days:
+        cfg = {**cfg, "keep_postings_days": args.keep_days}
+    stats = ingest.run_fetch(cfg, queue_users=not args.no_queue)
+    if "skipped" in stats:
+        log(f"Nothing done: {stats['skipped']}.")
+        return
+    log(f"\nFetched {stats['fetched']:,} postings: {stats['new']:,} new, {stats['skipped_old']:,} too old to keep. "
+        f"Dropped {stats['purged']:,} nobody lists any more. Queued {stats['queued']} user(s) for a new search. Took {stats['seconds']}s.")
+
+
 def cmd_mark(args, cfg, profile, conn) -> None:
     if args.status not in STATUSES:
         sys.exit(f"status must be one of: {', '.join(sorted(STATUSES))}")
@@ -618,6 +633,9 @@ def main() -> None:
     r = sub.add_parser("run", help="fetch, filter, score, and write a report")
     r.add_argument("--no-llm", action="store_true", help="fetch and filter only (no API calls)")
     r.add_argument("--limit", type=int, help="max LLM scoring calls this run")
+    f = sub.add_parser("fetch", help="read every source once for all users and keep the postings (run daily; see ingest.py)")
+    f.add_argument("--no-queue", action="store_true", help="don't mark users as waiting for a new search afterwards")
+    f.add_argument("--keep-days", type=int, help="drop postings nobody has listed for this many days (default 14)")
     l = sub.add_parser("list", help="show top scored jobs from the database")
     l.add_argument("--top", type=int, default=20)
     l.add_argument("--min-score", type=int)
@@ -646,16 +664,17 @@ def main() -> None:
 
     if not (ROOT / "config.yaml").exists():
         sys.exit("config.yaml not found. Copy config.example.yaml to config.yaml, then edit it (see the README).")
-    if not (ROOT / "profile.json").exists():
+    if args.cmd != "fetch" and not (ROOT / "profile.json").exists():   # the shared fetch is nobody's own
         sys.exit("profile.json not found. Copy profile.example.json to profile.json and fill in the facts a resume can't "
                  "show (citizenship, clearance, do_not_assume), then run: python main.py profile")
-    cfg = discovery.load_config(ROOT)
-    profile = json.loads((ROOT / "profile.json").read_text(encoding="utf-8"))
     load_env()
     conn = db.connect()
+    cfg = discovery.load_config(ROOT, conn)
+    profile = json.loads((ROOT / "profile.json").read_text(encoding="utf-8")) if (ROOT / "profile.json").exists() else {}
     # Every command takes the same four arguments, even those that ignore some of them.
     {"run": cmd_run, "list": cmd_list, "mark": cmd_mark, "profile": cmd_profile,
-     "discover": cmd_discover, "workday-add": cmd_workday_add, "crawl": cmd_crawl, "reformat": cmd_reformat}[args.cmd](args, cfg, profile, conn)
+     "discover": cmd_discover, "workday-add": cmd_workday_add, "crawl": cmd_crawl, "reformat": cmd_reformat,
+     "fetch": cmd_fetch}[args.cmd](args, cfg, profile, conn)
 
 
 if __name__ == "__main__":
