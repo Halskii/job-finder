@@ -352,6 +352,10 @@ h1{font-size:22px;margin:0 0 4px}.sub{color:var(--mute);margin:0 0 14px}
 .btn{padding:7px 12px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--ink);font:inherit;cursor:pointer;text-decoration:none}
 .btn:hover{border-color:var(--accent)}.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
 .btn.on{border-color:var(--accent);color:var(--accent);font-weight:600}
+.dl{display:flex;width:fit-content;max-width:100%;flex-direction:column;gap:8px;margin:8px 0 2px;padding:10px 14px;border:1px solid var(--line);border-radius:8px;background:var(--panel)}
+.dl-row{display:flex;align-items:center;gap:8px}.dl-label{min-width:96px;color:var(--ink);font-weight:600}
+.dl .btn{padding:4px 12px;font-size:13px;color:var(--accent)}
+.dl-warn{color:var(--warn);margin-top:6px}
 .chip{display:inline-block;padding:2px 9px;border-radius:99px;border:1px solid var(--line);font-size:13px;margin:0 6px 6px 0}
 .chip.good{color:var(--good);border-color:var(--good)}.chip.bad{color:var(--bad);border-color:var(--bad)}
 h2{font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--mute);margin:22px 0 6px}
@@ -674,8 +678,22 @@ function paintTailor(id){
     btn.replaceChildren(el("span",{className:"spinner"}));btn.setAttribute("aria-label","Working, this takes a minute or two");
   }else{btn.textContent=TAILOR_LABEL;btn.style.minWidth="";btn.removeAttribute("aria-label")}
   note.replaceChildren(document.createTextNode(st.message||""),
-    ...(st.files||[]).flatMap(f=>[" ",el("a",{href:"/api/files/"+encodeURIComponent(f),textContent:f,download:f})]),
-    ...(st.warning?[document.createTextNode(" "+st.warning)]:[]));
+    ...((st.files||[]).length?[downloadCard(st.files)]:[]),
+    ...(st.warning?[el("div",{className:"dl-warn",textContent:st.warning})]:[]));
+}
+function downloadCard(files){
+  // the four files, grouped: a row for the resume and a row for the cover letter, each with a PDF and a Word button
+  const kinds=[["Resume",/_resume\.(pdf|docx)$/i],["Cover letter",/_cover_letter\.(pdf|docx)$/i]];
+  const rows=kinds.map(([label,re])=>[label,files.filter(f=>re.test(f))]);
+  const other=files.filter(f=>!kinds.some(([,re])=>re.test(f)));
+  if(other.length)rows.push(["Files",other]);
+  const card=el("div",{className:"dl"});
+  rows.filter(([,fs])=>fs.length).forEach(([label,fs])=>{
+    const links=fs.sort((a,b)=>a.endsWith(".pdf")?-1:b.endsWith(".pdf")?1:0).map(f=>
+      el("a",{className:"btn",href:"/api/files/"+encodeURIComponent(f),download:f,title:f,textContent:f.endsWith(".docx")?"Word":f.endsWith(".pdf")?"PDF":f}));
+    card.append(el("div",{className:"dl-row"},el("span",{className:"dl-label",textContent:label}),...links));
+  });
+  return card;
 }
 function askTailor(j){
   const dlg=$("#tailor-dlg");
@@ -690,7 +708,7 @@ async function tailorJob(j,resume_request,letter_request){
   try{
     const d=await post("/api/tailor",{id:j.id,resume_request,letter_request});
     const long=Object.entries(d.pages).filter(([k,n])=>n>1).map(([k])=>k.replace("_"," "));
-    message="Ready to download (PDF and editable Word):";files=d.files.concat(d.word_files||[]);
+    message="Ready to download. The Word files are editable.";files=d.files.concat(d.word_files||[]);
     if(long.length)warning="The "+long.join(" and ")+" runs past one page; trim it before sending.";
   }catch(e){fail("Couldn't write your resume and cover letter",e);message="That didn't finish. "+friendly(e)}
   tailorState[j.id]={running:false,message,files,warning};paintTailor(j.id);
