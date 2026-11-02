@@ -136,6 +136,7 @@ gov_titles:
   - Web Developer
   - Developer
   - IT Specialist
+  - Information Technology Specialist
   - Computer Scientist
   - Computer Engineer
 
@@ -143,6 +144,12 @@ gov_titles:
 #  usajobs: the federal API. Needs a free key: add USAJOBS_API_KEY and USAJOBS_EMAIL (the email the key was issued to)
 #           to .env. Without them it is skipped with a note.
 #  texas_hhs: careers.hhs.texas.gov (HHSC, DFPS, DSHS). No API exists, so the public search pages are read.
+#  florida: jobs.myflorida.com (State of Florida agencies). No API exists, so the public search pages are read.
+#  vermont: careers.vermont.gov (State of Vermont). Same career site software as Florida.
+#  new_york: statejobsny.com (State of New York civil service). The public vacancy table is read; it lists every posting, so there are no search words.
+#  maryland, connecticut, delaware: jobapscloud.com/MD, /CT and /DE (JobAps). The home page lists every current recruitment, so there are no search words.
+#  arizona, missouri, wisconsin, massachusetts, montana, utah, kentucky, south_dakota, california, kansas, minnesota, north_dakota, tennessee: each state's own job site. The whole list is read (Arizona waits 5 seconds between pages, as its robots.txt asks).
+#  indiana, arkansas, illinois: SuccessFactors career sites, searched like Florida and Texas.
 government:
   usajobs:
     enabled: true
@@ -152,3 +159,57 @@ government:
     enabled: true
     search_terms: [developer, programmer, software, engineer, devops]
     pages: 2
+  florida:
+    enabled: true
+    search_terms: [developer, programmer, software, engineer, devops]
+    pages: 2
+  vermont:
+    enabled: true
+    search_terms: [developer, programmer, software, engineer, devops]
+    pages: 2
+  new_york:
+    enabled: true
+  maryland:
+    enabled: true
+  connecticut:
+    enabled: true
+  delaware:
+    enabled: true
+  indiana:
+    enabled: true
+    search_terms: [developer, programmer, software, engineer, devops]
+    pages: 2
+  arkansas:
+    enabled: true
+    search_terms: [developer, programmer, software, engineer, devops]
+    pages: 2
+  illinois:
+    enabled: true
+    search_terms: [developer, programmer, software, engineer, devops]
+    pages: 2
+  arizona:
+    enabled: true
+  missouri:
+    enabled: true
+  wisconsin:
+    enabled: true
+  massachusetts:
+    enabled: true
+  montana:
+    enabled: true
+  utah:
+    enabled: true
+  kentucky:
+    enabled: true
+  south_dakota:
+    enabled: true
+  california:
+    enabled: true
+  kansas:
+    enabled: true
+  minnesota:
+    enabled: true
+  north_dakota:
+    enabled: true
+  tennessee:
+    enabled: true

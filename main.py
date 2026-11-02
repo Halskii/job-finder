@@ -232,6 +232,18 @@ def collect_government(cfg: dict) -> list[sources.Job]:
             jobs += got
         except Exception as e:
             log(f"  texas hhs  {'(HHSC/DFPS/DSHS)':18s} skipped ({type(e).__name__}: {str(e)[:70]})")
+    for key, label, fetch, words in gov_sources.STATE_SOURCES:   # one reader per state job site
+        conf = gov.get(key) or {}
+        if not conf.get("enabled", True):
+            continue
+        try:
+            got = getattr(gov_sources, fetch)(conf.get("search_terms", words), conf.get("pages", 2), delay)
+            log(f"  {key:12s} {'(' + label + ')':14s} {len(got):4d} postings")
+            if not got:
+                log("             no postings found; the site's page layout may have changed")
+            jobs += got
+        except Exception as e:
+            log(f"  {key:12s} {'(' + label + ')':14s} skipped ({type(e).__name__}: {str(e)[:70]})")
     return jobs
 
 
@@ -546,6 +558,8 @@ def cmd_workday_add(args, cfg, profile, conn) -> None:
     except ValueError as e:
         log(str(e))
         return
+    if getattr(args, "gov", False):
+        entry["gov"] = True   # a state, city or university: also searched with the government titles
     try:
         total = discovery.check_workday(entry)
     except Exception as e:
@@ -703,6 +717,7 @@ def main() -> None:
     w = sub.add_parser("workday-add", help="add a Workday careers site from its web address")
     w.add_argument("url")
     w.add_argument("--name", help="label to show for the company")
+    w.add_argument("--gov", action="store_true", help="a government employer (state, city, university): also search it with gov_titles")
     args = ap.parse_args()
 
     if not (ROOT / "config.yaml").exists():
