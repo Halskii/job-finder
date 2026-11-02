@@ -13,6 +13,7 @@ import reformat
 import sources
 import tailor
 import skills
+import workmode
 import tips
 import userdata
 from errors import explain
@@ -104,7 +105,11 @@ def load_report(uid: int, name: str) -> dict | None:
                 j["status"], j["notes"], j["applied_at"] = row["status"] or "new", row["notes"] or "", row["applied_at"]
                 j["can_reformat"] = reformat.can_reformat(row["id"], row["formatted"])
                 j["pay"] = sources.pay_label(row["pay_min"], row["pay_max"], row["pay_unit"])   # the stored pay, which may be newer than the report
+                j["pay_low"], j["pay_high"] = pay_year(row["pay_min"], row["pay_max"], row["pay_unit"])
+                j["modes"] = modes_for(row["id"], title, row["location"], row["description"])
             else:
+                j["pay_low"] = j["pay_high"] = None
+                j["modes"] = workmode.detect(title, j.get("location", ""), "")
                 j["description"], j["status"], j["notes"], j["applied_at"], j["can_reformat"] = "", "new", "", None, False
             j["title"], j["company"] = title, company
             j["url"] = safe_url(j.get("url", ""))
@@ -113,11 +118,36 @@ def load_report(uid: int, name: str) -> dict | None:
     return data
 
 
+_MODES: dict = {}
+
+
+def modes_for(job_id, title, location, description) -> list:
+    """workmode.detect for a posting, remembered for as long as the posting's text stays the same (reading its text takes about half a
+    millisecond, which adds up to a visible wait over the hundreds of jobs the Matches list sends). The key is small: the id and
+    hashes of the three fields, not the text itself."""
+    key = (job_id, hash(title), hash(location), hash(description))
+    found = _MODES.get(key)
+    if found is None:
+        if len(_MODES) >= 50000:
+            _MODES.clear()
+        found = _MODES[key] = workmode.detect(title, location, description)
+    return list(found)
+
+
+def pay_year(lo, hi, unit) -> tuple:
+    """The pay as dollars a year (an hourly rate counts as a full-time year), or None when the posting gave none: what the page's
+    salary filter compares."""
+    f = sources.HOURS_PER_YEAR if (unit or "year") == "hour" else 1
+    return (int(lo * f) if lo else None), (int(hi * f) if hi else None)
+
+
 def job_dict(r) -> dict:
     """A stored job in the same shape load_report gives, so the page can show it like any report entry."""
     a = json.loads(r["analysis"] or "{}")
     pay = sources.pay_label(r["pay_min"], r["pay_max"], r["pay_unit"])
+    low, high = pay_year(r["pay_min"], r["pay_max"], r["pay_unit"])
     return {
+        "pay_low": low, "pay_high": high, "modes": modes_for(r["id"], r["title"], r["location"], r["description"]),
         "id": r["id"], "score": r["score"] or 0, "title": r["title"], "company": r["company"],
         "location": r["location"] or "", "pay": pay, "posted": r["posted"] or "unknown",
         "verdict": r["verdict"] or "", "reason": a.get("reason", ""), "matched": a.get("matched", []),
@@ -357,6 +387,34 @@ nav select,nav input{width:100%;padding:7px 9px;border:1px solid var(--line);bor
 .score.hi{color:var(--good);border-color:var(--good)}.score.mid{color:var(--warn);border-color:var(--warn)}
 .item .t{font-weight:600;line-height:1.3}.item .c{color:var(--mute);font-size:13px}
 .item.done{opacity:.55}
+.searchrow{display:flex;gap:8px}.searchrow input{flex:1;min-width:0}
+#filter-btn{display:flex;align-items:center;gap:6px;padding:6px 10px;white-space:nowrap}
+#filter-btn[aria-expanded="true"]{border-color:var(--accent);color:var(--accent)}
+#filter-badge{min-width:18px;height:18px;padding:0 5px;border-radius:99px;background:var(--accent);color:var(--on-accent);font-size:11px;font-weight:700;display:grid;place-items:center}#filter-badge[hidden]{display:none}
+.chips{display:flex;flex-wrap:wrap;gap:6px;align-items:center}.chips[hidden],#filters[hidden]{display:none}
+.fchip{display:inline-flex;align-items:center;gap:5px;padding:2px 8px 2px 10px;border:1px solid var(--accent);border-radius:99px;background:none;color:var(--accent);font:inherit;font-size:12px;cursor:pointer}
+.fchip:hover{background:var(--bg)}.fchip .x{font-size:14px;line-height:1;opacity:.8}
+.chips .tally{margin-left:auto;font-size:12px;color:var(--mute)}
+#filters{border:1px solid var(--line);border-radius:10px;background:var(--bg);padding:12px;display:grid;gap:14px;max-height:52vh;overflow:auto}
+.fgroup{display:grid;gap:7px}
+.fgroup .fl{display:flex;justify-content:space-between;align-items:baseline;font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:var(--mute);font-weight:600}
+.fgroup .fl .val{letter-spacing:0;text-transform:none;font-size:13px;color:var(--ink);font-weight:500}
+.seg{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--panel)}
+.seg button{flex:1;border:0;border-right:1px solid var(--line);background:none;color:var(--mute);padding:6px 0;font:inherit;font-size:13px;cursor:pointer}
+.seg button:last-child{border-right:0}.seg button:hover{color:var(--ink)}
+.seg button[aria-pressed="true"]{background:var(--accent);color:var(--on-accent);font-weight:600}
+nav #filters input[type=range]{width:100%;padding:0;border:0;background:none;accent-color:var(--accent);height:22px;cursor:pointer}
+.check{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--mute);cursor:pointer}
+nav #filters input[type=checkbox]{width:auto;padding:0;accent-color:var(--accent)}
+.opts{display:flex;flex-wrap:wrap;gap:6px}
+.opt{display:inline-flex;align-items:baseline;gap:5px;padding:3px 10px;border:1px solid var(--line);border-radius:99px;background:var(--panel);color:var(--ink);font:inherit;font-size:13px;cursor:pointer}
+.opt small{color:var(--mute);font-size:11px}
+.opt:hover{border-color:var(--accent)}
+.opt[aria-pressed="true"]{border-color:var(--accent);background:var(--accent);color:var(--on-accent);font-weight:600}.opt[aria-pressed="true"] small{color:inherit;opacity:.85}
+.fmore{background:none;border:0;color:var(--accent);font:inherit;font-size:13px;padding:2px 0;cursor:pointer;justify-self:start}
+.ffoot{display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:13px;color:var(--mute);border-top:1px solid var(--line);padding-top:10px}
+.ffoot .link{background:none;border:0;color:var(--accent);font:inherit;padding:0;cursor:pointer;text-decoration:underline}
+.nomatch{padding:24px 16px;text-align:center;color:var(--mute);display:grid;gap:10px;justify-items:center}
 #stage{flex:1;min-width:0;position:relative;display:flex;flex-direction:column}
 main{flex:1;min-height:0;overflow:auto;padding:52px 32px 24px}
 .card{position:relative}.card h1{padding-right:56px}
@@ -442,9 +500,9 @@ td.actions-cell .btn{display:block;width:100%;padding:4px 8px;margin:0 0 4px}td.
   nav,#trash-btn,#topbar,.save-btn,#prep-panel,#toasts,.row{display:none!important}
   #desc{border:0;padding:0}.chip{border-color:#999}
 }
-@media (max-width:760px){body{flex-direction:column;height:auto}nav{width:auto;max-height:45vh}main{padding:52px 16px 16px}}
+@media (max-width:760px){body{flex-direction:column;height:auto}nav{width:auto}#list{max-height:45vh}#filters{max-height:40vh}main{padding:52px 16px 16px}}   /* the list scrolls on its own; the filters can grow the sidebar */
 </style></head><body>
-<nav><header><div class="tabs"><a class="tab" id="tab-matches" href="#">Matches</a><a class="tab" id="tab-saved" href="#saved">Saved <span id="scount"></span></a><a class="tab" id="tab-prep" href="#prep">Interview Prep <span id="pcount"></span></a><a class="tab" id="tab-tracker" href="#tracker">Tracker <span id="tcount"></span></a></div><select id="report" aria-label="Report"></select><input id="q" placeholder="Filter by title or company" aria-label="Filter"></header><div id="progress" hidden></div><div id="list"></div></nav>
+<nav><header><div class="tabs"><a class="tab" id="tab-matches" href="#">Matches</a><a class="tab" id="tab-saved" href="#saved">Saved <span id="scount"></span></a><a class="tab" id="tab-prep" href="#prep">Interview Prep <span id="pcount"></span></a><a class="tab" id="tab-tracker" href="#tracker">Tracker <span id="tcount"></span></a></div><select id="report" aria-label="Report"></select><div class="searchrow"><input id="q" placeholder="Search title or company" aria-label="Search by title or company"><button class="btn" id="filter-btn" type="button" aria-expanded="false" aria-controls="filters" title="Filter by place, match score and salary"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 5h18l-7 8v6l-4 2v-8z"/></svg><span>Filters</span><span id="filter-badge" hidden></span></button></div><div id="chips" class="chips" hidden></div><div id="filters" hidden></div></header><div id="progress" hidden></div><div id="list"></div></nav>
 <div id="toasts" role="status" aria-live="polite"></div>
 <dialog id="confirm-dlg" aria-labelledby="confirm-title" aria-describedby="confirm-msg"><h3 id="confirm-title"></h3><p id="confirm-msg"></p>
 <div class="actions"><button class="btn" id="confirm-cancel"></button><button class="btn" id="confirm-ok"></button></div></dialog>
@@ -560,10 +618,20 @@ async function loadReports(){
   if(!reportNames.length&&!savedCount){$("#list").replaceChildren(el("div",{className:"empty",textContent:"No reports yet. Run: python main.py run"}));return}
   await openReport(reportNames[0]||SAVED);
 }
+const reportCache=new Map();   // report name -> {jobs, fp}: the last answer for each list, so switching back to it is instant
+const fingerprint=list=>list.map(j=>[j.id,j.status,j.score,j.applied_at||"",j.pay,j.notes||""].join("|")).join("\n");   // what the list shows, much cheaper to compare than the descriptions
+function showJobs(list){jobs=list;if(!$("#filters").hidden)buildFilterPanel();syncFilterPanel();renderList();route()}
 async function openReport(name){
   reportName=name;$("#report").value=name;
-  const data=await api(name===MATCHES?"/api/matches":name===SAVED?"/api/saved":name===PREP?"/api/prep":name===TRASH?"/api/trash":"/api/report/"+encodeURIComponent(name));
-  jobs=data.jobs;renderList();route();
+  const cached=reportCache.get(name);
+  if(cached)showJobs(cached.jobs);   // what this list looked like when you last had it open, while the current one is fetched
+  let data;
+  try{data=await api(name===MATCHES?"/api/matches":name===SAVED?"/api/saved":name===PREP?"/api/prep":name===TRASH?"/api/trash":"/api/report/"+encodeURIComponent(name))}
+  catch(e){if(cached)return;throw e}   // with an old copy on screen, a failed refresh is not worth an error
+  const fp=fingerprint(data.jobs);
+  if(cached&&cached.fp===fp)return;     // nothing changed: keep what is showing, including the job you have open
+  reportCache.set(name,{jobs:data.jobs,fp});
+  if(reportName===name)showJobs(data.jobs);   // not when you have already moved on to another list
 }
 function hiddenFromList(j){   // discarded jobs live in the trash, saved ones in the Saved tab, applied ones in the tracker
   if(reportName===TRASH)return false;
@@ -571,15 +639,148 @@ function hiddenFromList(j){   // discarded jobs live in the trash, saved ones in
   if(j.status==="saved"&&reportName!==SAVED&&reportName!==PREP)return true;   // only the report lists hide saved jobs
   return reportName!==PREP&&APPLIED.includes(j.status)&&!!j.applied_at;       // the Interview Prep list keeps applied jobs
 }
+const STATE_NAMES={AL:"Alabama",AK:"Alaska",AZ:"Arizona",AR:"Arkansas",CA:"California",CO:"Colorado",CT:"Connecticut",DE:"Delaware",DC:"District of Columbia",FL:"Florida",GA:"Georgia",HI:"Hawaii",ID:"Idaho",IL:"Illinois",IN:"Indiana",IA:"Iowa",KS:"Kansas",KY:"Kentucky",LA:"Louisiana",ME:"Maine",MD:"Maryland",MA:"Massachusetts",MI:"Michigan",MN:"Minnesota",MS:"Mississippi",MO:"Missouri",MT:"Montana",NE:"Nebraska",NV:"Nevada",NH:"New Hampshire",NJ:"New Jersey",NM:"New Mexico",NY:"New York",NC:"North Carolina",ND:"North Dakota",OH:"Ohio",OK:"Oklahoma",OR:"Oregon",PA:"Pennsylvania",RI:"Rhode Island",SC:"South Carolina",SD:"South Dakota",TN:"Tennessee",TX:"Texas",UT:"Utah",VT:"Vermont",VA:"Virginia",WA:"Washington",WV:"West Virginia",WI:"Wisconsin",WY:"Wyoming"};
+const PROVINCES={AB:"Alberta",BC:"British Columbia",MB:"Manitoba",NB:"New Brunswick",NL:"Newfoundland and Labrador",NS:"Nova Scotia",ON:"Ontario",PE:"Prince Edward Island",QC:"Quebec",SK:"Saskatchewan"};
+const STATE_BY_LENGTH=Object.entries(STATE_NAMES).sort((x,y)=>y[1].length-x[1].length);   // "West Virginia" is tried before "Virginia"
+const COUNTRIES=["Argentina","Australia","Austria","Belgium","Brazil","Bulgaria","Chile","China","Colombia","Costa Rica","Croatia","Czech Republic","Denmark","Egypt","Estonia","Finland","France","Germany","Greece","Hong Kong","Hungary","India","Indonesia","Ireland","Israel","Italy","Japan","Kenya","Latvia","Lithuania","Malaysia","Mexico","Netherlands","New Zealand","Nigeria","Norway","Pakistan","Peru","Philippines","Poland","Portugal","Romania","Saudi Arabia","Serbia","Singapore","Slovakia","Slovenia","South Africa","South Korea","Spain","Sweden","Switzerland","Taiwan","Thailand","Turkey","Ukraine","United Arab Emirates","Uruguay","Vietnam"].map(n=>[n,new RegExp("\\b"+n+"\\b","i")]);
+const placeCache=new Map();
+function placeOf(location){   // the states and countries a location line names: "Austin, TX | Remote - US", "Toronto, ON", "Berlin, Germany"
+  const text=String(location||"");
+  if(placeCache.has(text))return placeCache.get(text);
+  const states=new Set(),countries=new Set();
+  let rest=text.replace(/washington,?\s*d\.?\s?c\.?/ig,()=>{states.add("DC");return " "});
+  for(const [code,name] of STATE_BY_LENGTH){
+    const re=new RegExp("\\b"+name+"\\b","ig");
+    if(re.test(rest)){states.add(code);rest=rest.replace(re," ")}
+  }
+  for(const m of text.matchAll(/(?:^|[\s,(|\/-])([A-Z]{2})(?=$|[\s,)|\/.-])/g)){
+    if(STATE_NAMES[m[1]])states.add(m[1]);
+    else if(PROVINCES[m[1]]&&/,\s*[A-Z]{2}\b/.test(text))countries.add("Canada");
+  }
+  if(states.size||/\b(united states|usa|u\.s\.a?\.?)\b|\bUS\b/i.test(text))countries.add("United States");
+  if(/\bcanada\b/i.test(text))countries.add("Canada");
+  if(/\b(united kingdom|great britain|england|scotland|wales|northern ireland)\b|\bUK\b/i.test(text))countries.add("United Kingdom");
+  for(const [name,re] of COUNTRIES)if(re.test(text))countries.add(name);
+  const out={states,countries};placeCache.set(text,out);return out;
+}
+const F={states:new Set(),countries:new Set(),modes:new Set(),remoteEverywhere:true,score:0,salary:0,unlisted:true};
+const MODES=[["remote","Remote"],["hybrid","Hybrid"],["onsite","In person"],["unstated","Not stated"]];   // how the posting says the work is done
+const modesOf=j=>(j.modes&&j.modes.length)?j.modes:["unstated"];
+const isRemote=j=>modesOf(j).includes("remote")||/\bremote\b/i.test(j.location||"");
+const SCORE_STEPS=[[0,"Any"],[60,"60+"],[70,"70+"],[80,"80+"],[90,"90+"]];
+const SALARY_MAX=250000,SALARY_STEP=10000;
+let statesOpen=false;
+function loadFilters(){
+  try{
+    const s=JSON.parse(localStorage.getItem("filters")||"{}");
+    F.states=new Set((s.states||[]).filter(c=>STATE_NAMES[c]));F.countries=new Set((s.countries||[]).map(String));
+    F.modes=new Set((s.modes||[]).filter(m=>MODES.some(([k])=>k===m)));F.remoteEverywhere=s.remoteEverywhere!==false;
+    F.score=SCORE_STEPS.some(([v])=>v===s.score)?s.score:0;F.salary=Math.max(0,Math.min(SALARY_MAX,+s.salary||0));F.unlisted=s.unlisted!==false;
+  }catch(e){}
+}
+function saveFilters(){try{localStorage.setItem("filters",JSON.stringify({states:[...F.states],countries:[...F.countries],modes:[...F.modes],remoteEverywhere:F.remoteEverywhere,score:F.score,salary:F.salary,unlisted:F.unlisted}))}catch(e){}}
+function activeGroups(){return (F.states.size?1:0)+(F.countries.size?1:0)+(F.modes.size?1:0)+(F.score?1:0)+(F.salary?1:0)}
+function passes(j){   // every filter that is on must agree; within states, or within countries, any one is enough
+  if(F.score&&(j.score||0)<F.score)return false;
+  if(F.salary){const top=j.pay_high??j.pay_low;if(top==null){if(!F.unlisted)return false}else if(top<F.salary)return false}
+  if(F.modes.size&&!modesOf(j).some(m=>F.modes.has(m)))return false;
+  if(F.states.size||F.countries.size){
+    const p=placeOf(j.location),anywhere=F.remoteEverywhere&&isRemote(j);   // remote work can be done from any place, unless its own country says otherwise
+    if(F.states.size&&![...p.states].some(s=>F.states.has(s))&&!(anywhere&&(!p.countries.size||p.countries.has("United States"))))return false;
+    if(F.countries.size&&![...p.countries].some(c=>F.countries.has(c))&&!(anywhere&&!p.countries.size))return false;
+  }
+  return true;
+}
+const money=n=>"$"+n.toLocaleString("en-US");
+const modeNote=j=>{const names=(j.modes||[]).map(m=>(MODES.find(([k])=>k===m)||[])[1]).filter(Boolean);return names.length?" · "+names.join(" / "):""};
+function clearFilters(){F.states.clear();F.countries.clear();F.modes.clear();F.score=0;F.salary=0;F.unlisted=true;saveFilters();syncFilterPanel();renderList()}
+function flip(set,v){set.has(v)?set.delete(v):set.add(v);saveFilters();syncFilterPanel();renderList()}
+function optionButton(label,count,on,title,click){
+  const b=el("button",{className:"opt",type:"button",title,onclick:click},label,...(count?[el("small",{textContent:count})]:[]));
+  b.setAttribute("aria-pressed",on?"true":"false");return b;
+}
+function buildFilterPanel(){   // the choices come from what is in the list now: only places that have jobs
+  const box=$("#filters");
+  const visible=jobs.filter(j=>!hiddenFromList(j)),states=new Map(),countries=new Map();
+  for(const j of visible){const p=placeOf(j.location);p.states.forEach(s=>states.set(s,(states.get(s)||0)+1));p.countries.forEach(c=>countries.set(c,(countries.get(c)||0)+1))}
+  F.states.forEach(s=>states.has(s)||states.set(s,0));F.countries.forEach(c=>countries.has(c)||countries.set(c,0));   // a saved choice stays visible so it can be switched off
+  const byCount=m=>[...m.entries()].sort((x,y)=>y[1]-x[1]||String(x[0]).localeCompare(String(y[0])));
+  const score=el("div",{className:"seg"},...SCORE_STEPS.map(([v,label])=>{
+    const b=el("button",{type:"button",textContent:label,onclick:()=>{F.score=v;saveFilters();syncFilterPanel();renderList()}});b.dataset.v=v;return b}));
+  score.setAttribute("role","group");score.setAttribute("aria-label","Minimum match score");
+  const range=el("input",{type:"range",id:"f-salary",min:0,max:SALARY_MAX,step:SALARY_STEP,value:F.salary});
+  range.setAttribute("aria-label","Minimum yearly salary");
+  range.addEventListener("input",()=>{F.salary=+range.value;saveFilters();syncFilterPanel();renderList()});
+  const unlisted=el("input",{type:"checkbox",id:"f-unlisted"});unlisted.checked=F.unlisted;
+  unlisted.addEventListener("change",()=>{F.unlisted=unlisted.checked;saveFilters();syncFilterPanel();renderList()});
+  const countryList=byCount(countries),stateList=byCount(states);
+  const shownStates=statesOpen?stateList:stateList.slice(0,12);
+  const modeCount=new Map();for(const j of visible)for(const m of modesOf(j))modeCount.set(m,(modeCount.get(m)||0)+1);
+  const remoteBox=el("input",{type:"checkbox",id:"f-remote"});remoteBox.checked=F.remoteEverywhere;
+  remoteBox.addEventListener("change",()=>{F.remoteEverywhere=remoteBox.checked;saveFilters();syncFilterPanel();renderList()});
+  box.replaceChildren(
+    el("div",{className:"fgroup"},el("div",{className:"fl"},el("span",{textContent:"Match score"})),score),
+    el("div",{className:"fgroup"},el("div",{className:"fl"},el("span",{textContent:"Where the work is done"})),
+      el("div",{className:"opts"},...MODES.filter(([k])=>modeCount.get(k)||F.modes.has(k)).map(([k,label])=>
+        optionButton(label,modeCount.get(k)||"",F.modes.has(k),k==="unstated"?"The posting does not say":"As the posting says",()=>flip(F.modes,k))))),
+    el("div",{className:"fgroup"},el("div",{className:"fl"},el("span",{textContent:"Salary"}),el("span",{className:"val",id:"f-salary-val"})),range,
+      el("label",{className:"check",id:"f-unlisted-row",htmlFor:"f-unlisted"},unlisted,el("span",{textContent:"Include jobs that don't list a salary"}))),
+    ...(countryList.length?[el("div",{className:"fgroup"},el("div",{className:"fl"},el("span",{textContent:"Country"})),
+      el("div",{className:"opts"},...countryList.map(([c,n])=>optionButton(c,n||"",F.countries.has(c),c,()=>flip(F.countries,c)))))]:[]),
+    ...(stateList.length?[el("div",{className:"fgroup"},el("div",{className:"fl"},el("span",{textContent:"State"})),
+      el("div",{className:"opts"},...shownStates.map(([s,n])=>optionButton(s,n||"",F.states.has(s),STATE_NAMES[s],()=>flip(F.states,s)))),
+      ...(stateList.length>12?[el("button",{className:"fmore",type:"button",textContent:statesOpen?"Show fewer":"Show all "+stateList.length+" states",
+        onclick:()=>{statesOpen=!statesOpen;buildFilterPanel();syncFilterPanel()}})]:[]))]:[]),
+    ...(countryList.length||stateList.length?[el("label",{className:"check",htmlFor:"f-remote"},remoteBox,
+      el("span",{textContent:"Always include remote jobs when filtering by place"}))]:[]),
+    el("div",{className:"ffoot"},el("span",{id:"f-tally"}),el("button",{className:"link",type:"button",textContent:"Clear all",onclick:clearFilters})));
+}
+function syncFilterPanel(){   // brings the open panel, the chips under the search box and the badge in line with F (without rebuilding the panel)
+  document.querySelectorAll("#filters .seg button").forEach(b=>b.setAttribute("aria-pressed",String(+b.dataset.v===F.score)));
+  const range=$("#f-salary");if(range)range.value=F.salary;
+  const val=$("#f-salary-val");if(val)val.textContent=F.salary?"at least "+money(F.salary)+" a year":"Any";
+  const row=$("#f-unlisted-row");if(row)row.style.display=F.salary?"flex":"none";   // only matters once a minimum is set
+  const un=$("#f-unlisted");if(un)un.checked=F.unlisted;
+  const chips=[];
+  F.modes.forEach(m=>chips.push([MODES.find(([k])=>k===m)[1],()=>flip(F.modes,m)]));
+  F.countries.forEach(c=>chips.push([c,()=>flip(F.countries,c)]));
+  F.states.forEach(s=>chips.push([STATE_NAMES[s]||s,()=>flip(F.states,s)]));
+  if(F.score)chips.push(["Score "+F.score+"+",()=>{F.score=0;saveFilters();syncFilterPanel();renderList()}]);
+  if(F.salary)chips.push([money(F.salary)+"+",()=>{F.salary=0;saveFilters();syncFilterPanel();renderList()}]);
+  $("#chips").replaceChildren(...chips.map(([label,remove])=>el("button",{className:"fchip",type:"button",title:"Remove this filter",onclick:remove},label,el("span",{className:"x",textContent:"×"}))),
+    el("span",{className:"tally",id:"chips-tally"}));
+  $("#chips").hidden=!chips.length;
+  const n=activeGroups(),badge=$("#filter-badge");badge.hidden=!n;badge.textContent=n;
+  document.querySelectorAll("#filters .opt").forEach(b=>{   // the pressed look of the place buttons
+    const label=b.firstChild.textContent,mode=(MODES.find(([,text])=>text===label)||[])[0];
+    b.setAttribute("aria-pressed",String(F.countries.has(label)||F.states.has(label)||(mode&&F.modes.has(mode))))});
+  const rb=$("#f-remote");if(rb)rb.checked=F.remoteEverywhere;
+  showTally();
+}
+let lastCounts=[0,0];
+function showTally(){
+  const [shown,total]=lastCounts,text=activeGroups()||$("#q").value?shown+" of "+total+" jobs":"";
+  const a=$("#f-tally"),b=$("#chips-tally");if(a)a.textContent=shown+" of "+total+" jobs";if(b)b.textContent=text;
+}
+function setFiltersOpen(open){
+  $("#filters").hidden=!open;$("#filter-btn").setAttribute("aria-expanded",String(open));
+  if(open){buildFilterPanel();syncFilterPanel()}
+}
 function renderList(){
-  const q=$("#q").value.toLowerCase();
-  const items=jobs.filter(j=>!hiddenFromList(j)&&(j.title+" "+j.company).toLowerCase().includes(q)).map(j=>{
+  const q=$("#q").value.toLowerCase().trim();
+  const visible=jobs.filter(j=>!hiddenFromList(j));
+  const shown=visible.filter(j=>(j.title+" "+j.company).toLowerCase().includes(q)&&passes(j));
+  const items=shown.map(j=>{
     const tier=j.score>=80?"hi":j.score>=60?"mid":"";
     const a=el("a",{className:"item"+(["applied","rejected","withdrawn"].includes(j.status)?" done":""),href:"#"+encodeURIComponent(j.id)},
       el("div",{className:"score "+tier,textContent:j.score}),
-      el("div",{},el("div",{className:"t",textContent:j.title}),el("div",{className:"c",textContent:j.company+" · "+(j.location||"")+(j.applied_at?" · ✓ applied":"")+(j.status==="saved"?" · ★ saved":"")})));
+      el("div",{},el("div",{className:"t",textContent:j.title}),el("div",{className:"c",textContent:j.company+" · "+(j.location||"")+modeNote(j)+(j.applied_at?" · ✓ applied":"")+(j.status==="saved"?" · ★ saved":"")})));
     a.dataset.id=j.id;return a});
-  $("#list").replaceChildren(...(items.length||q||!EMPTY[reportName]?items:[el("div",{className:"empty",textContent:EMPTY[reportName]})]));markSelected();
+  const filtering=!!q||activeGroups()>0;
+  const none=el("div",{className:"nomatch"},el("div",{textContent:"No jobs match these filters."}),
+    el("button",{className:"btn",type:"button",textContent:"Clear filters",onclick:()=>{$("#q").value="";clearFilters()}}));
+  $("#list").replaceChildren(...(items.length?items:filtering&&visible.length?[none]:EMPTY[reportName]?[el("div",{className:"empty",textContent:EMPTY[reportName]})]:items));
+  lastCounts=[items.length,visible.length];showTally();markSelected();
 }
 function markSelected(){
   const id=decodeURIComponent(location.hash.slice(1));
@@ -620,7 +821,7 @@ function route(){
   }
   if(j)lastJob=id;
   if(!j){$("#main").replaceChildren(el("div",{className:"empty",textContent:jobs.length?"Select a job from the list.":"No jobs in this report."}));return}
-  const meta=[j.location,/^(n\/a( - n\/a)?|\?( - \?)?)?$/.test((j.pay||"").trim())?"Salary Non-Disclosed":j.pay,j.posted&&"Posted "+j.posted].filter(Boolean).join("  ·  ");
+  const meta=[j.location,(j.modes||[]).map(m=>(MODES.find(([k])=>k===m)||[])[1]).filter(Boolean).join(" / "),/^(n\/a( - n\/a)?|\?( - \?)?)?$/.test((j.pay||"").trim())?"Salary Non-Disclosed":j.pay,j.posted&&"Posted "+j.posted].filter(Boolean).join("  ·  ");
   const buttons=el("div",{className:"row"});
   if(j.url)buttons.append(el("a",{className:"btn primary",href:j.url,target:"_blank",rel:"noopener noreferrer",textContent:"Open original posting"}));
   const tracked=APPLIED.includes(j.status)&&j.applied_at;
@@ -662,7 +863,7 @@ async function setStatus(j,status,explicit){
   const ids=[...document.querySelectorAll(".item")].map(a=>a.dataset.id),at=ids.indexOf(j.id);
   try{
     const res=await post("/api/mark",{id:j.id,status});
-    j.status=status;j.applied_at=res.applied_at;
+    j.status=status;j.applied_at=res.applied_at;reportCache.clear();   // other lists may now show this job differently, so they are fetched again
     if(reportName===SAVED)jobs=jobs.filter(x=>x.status==="saved");   // a job you unsave or act on leaves the Saved list
     if(reportName===TRASH)jobs=jobs.filter(x=>x.status==="skipped");   // a job you restore leaves the trash
     const next=status!=="saved"&&at>=0&&(!jobs.includes(j)||hiddenFromList(j))?(ids[at+1]||ids[at-1]):undefined;   // it left the list: move on to the neighbouring job, except after saving one: stay, so the filled bookmark shows
@@ -964,6 +1165,8 @@ function step(d){
 }
 addEventListener("hashchange",route);
 $("#q").addEventListener("input",renderList);
+loadFilters();syncFilterPanel();
+$("#filter-btn").addEventListener("click",()=>setFiltersOpen($("#filters").hidden));
 addEventListener("keydown",e=>{if(e.target.matches("input,select")||e.ctrlKey||e.metaKey||e.altKey)return;
   if(e.key==="j")step(1);else if(e.key==="k")step(-1)});
 $("#tab-matches").addEventListener("click",async e=>{
