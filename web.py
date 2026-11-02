@@ -544,20 +544,51 @@ def reformat_(body: dict = Depends(json_body), user: dict = Depends(current_user
         raise not_found() from None
 
 
-@app.post("/api/tailor")
-def tailor_(body: dict = Depends(json_body), user: dict = Depends(current_user)):
-    """Make the tailored resume and cover letter for one job. Takes a minute or two, since it waits on the model."""
+def make_document(kind: str, make, body: dict, user: dict) -> dict:
+    """Make one document (a tailored resume, or a cover letter) for one job. `kind` is its limit and lock name. Takes a minute or so, since it
+    waits on the model. The two documents can be made at the same time, but not two of the same kind."""
     job_id = job_id_of(body)
-    lock = user_lock("tailor", user["id"])
+    lock = user_lock(kind, user["id"])
     if not lock.acquire(blocking=False):
         raise Problem(409, "Already working on another job. Wait for it to finish.", "busy")
     conn = viewer._db(user["id"])
     try:
-        with limits.paid_call(conn, "tailor") as spent:
-            result = viewer.tailor_for(user["id"], job_id, tailor.clean_request(body.get("resume_request")),
-                                       tailor.clean_request(body.get("letter_request")))
+        with limits.paid_call(conn, kind) as spent:
+            result = make(user["id"], job_id, tailor.clean_request(body.get("request")))
             spent.tokens(result.get("tokens", {}).get("in"), result.get("tokens", {}).get("out"))
             return result
+    except LookupError:
+        raise not_found() from None
+    finally:
+        conn.close()
+        lock.release()
+
+
+@app.post("/api/tailor")
+def tailor_(body: dict = Depends(json_body), user: dict = Depends(current_user)):
+    """Make the tailored resume for one job."""
+    return make_document("tailor", viewer.tailor_for, body, user)
+
+
+@app.post("/api/letter")
+def letter_(body: dict = Depends(json_body), user: dict = Depends(current_user)):
+    """Write the cover letter for one job."""
+    return make_document("letter", viewer.letter_for, body, user)
+
+
+@app.post("/api/skills")
+def skills_(body: dict = Depends(json_body), user: dict = Depends(current_user)):
+    """The skills from this person's profile that fit one job, to paste into an application. One short model call."""
+    job_id = job_id_of(body)
+    lock = user_lock("skills", user["id"])
+    if not lock.acquire(blocking=False):
+        raise Problem(409, "Already working on another job's skills. Wait for it to finish.", "busy")
+    conn = viewer._db(user["id"])
+    try:
+        with limits.paid_call(conn, "skills") as spent:
+            result = viewer.skills_for(user["id"], job_id)
+            spent.tokens(result["tokens"]["in"], result["tokens"]["out"])
+            return {"skills": result["skills"]}
     except LookupError:
         raise not_found() from None
     finally:

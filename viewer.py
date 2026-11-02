@@ -12,6 +12,7 @@ import db
 import reformat
 import sources
 import tailor
+import skills
 import tips
 import userdata
 from errors import explain
@@ -304,10 +305,26 @@ def tips_events(uid: int, job_id: str, refresh: bool = False):
         conn.close()
 
 
-def tailor_for(uid: int, job_id: str, resume_request: str = "", letter_request: str = "") -> dict:
+def tailor_for(uid: int, job_id: str, request: str = "") -> dict:
     conn = _db(uid)
     try:
-        return tailor.tailor_job(conn, job_id, resume_request=resume_request, letter_request=letter_request)
+        return tailor.tailor_resume(conn, job_id, request=request)
+    finally:
+        conn.close()
+
+
+def letter_for(uid: int, job_id: str, request: str = "") -> dict:
+    conn = _db(uid)
+    try:
+        return tailor.write_cover_letter(conn, job_id, request=request)
+    finally:
+        conn.close()
+
+
+def skills_for(uid: int, job_id: str) -> dict:
+    conn = _db(uid)
+    try:
+        return skills.for_job(conn, job_id)
     finally:
         conn.close()
 
@@ -356,6 +373,7 @@ h1{font-size:22px;margin:0 0 4px}.sub{color:var(--mute);margin:0 0 14px}
 .dl-row{display:flex;align-items:center;gap:8px}.dl-label{min-width:96px;color:var(--ink);font-weight:600}
 .dl .btn{padding:4px 12px;font-size:13px;color:var(--accent)}
 .dl-warn{color:var(--warn);margin-top:6px}
+#skills-box .dl{margin:0 0 10px}.skill-list{max-width:640px}
 .chip{display:inline-block;padding:2px 9px;border-radius:99px;border:1px solid var(--line);font-size:13px;margin:0 6px 6px 0}
 .chip.good{color:var(--good);border-color:var(--good)}.chip.bad{color:var(--bad);border-color:var(--bad)}
 h2{font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--mute);margin:22px 0 6px}
@@ -431,16 +449,13 @@ td.actions-cell .btn{display:block;width:100%;padding:4px 8px;margin:0 0 4px}td.
 <dialog id="confirm-dlg" aria-labelledby="confirm-title" aria-describedby="confirm-msg"><h3 id="confirm-title"></h3><p id="confirm-msg"></p>
 <div class="actions"><button class="btn" id="confirm-cancel"></button><button class="btn" id="confirm-ok"></button></div></dialog>
 <dialog id="tailor-dlg"><form method="dialog">
-<h3>Tailor resume + cover letter</h3><div class="muted" id="tailor-for"></div>
-<div class="muted" style="margin-top:8px">Both boxes are optional. Leave them empty to use the defaults. Your requests are followed as long as they stay true to your resume and profile.</div>
-<label for="tailor-resume">Resume request (optional)</label>
-<textarea id="tailor-resume" maxlength="2000" placeholder="e.g. Lead with my Kubernetes work and keep the skills section short"></textarea>
-<div class="muted count" id="tailor-resume-n"></div>
-<label for="tailor-letter">Cover letter request (optional)</label>
-<textarea id="tailor-letter" maxlength="2000" placeholder="e.g. Mention that I am open to relocating, and keep it under 250 words"></textarea>
-<div class="muted count" id="tailor-letter-n"></div>
-<div class="muted" style="margin-top:10px;font-size:12px">Up to 2,000 characters in each box, plain text only. Control and invisible characters are removed.</div>
-<div class="actions"><button class="btn" value="cancel">Cancel</button><button class="btn primary" value="ok">Tailor</button></div>
+<h3 id="tailor-title"></h3><div class="muted" id="tailor-for"></div>
+<div class="muted" style="margin-top:8px">The box is optional. Leave it empty to use the defaults. Your request is followed as long as it stays true to your resume and profile.</div>
+<label for="tailor-request">Your request (optional)</label>
+<textarea id="tailor-request" maxlength="2000"></textarea>
+<div class="muted count" id="tailor-request-n"></div>
+<div class="muted" style="margin-top:10px;font-size:12px">Up to 2,000 characters, plain text only. Control and invisible characters are removed.</div>
+<div class="actions"><button class="btn" value="cancel">Cancel</button><button class="btn primary" id="tailor-go" value="ok"></button></div>
 </form></dialog>
 <datalist id="round-kinds"><option value="Recruiter screen"><option value="Phone screen"><option value="Technical screen"><option value="Coding interview"><option value="System design"><option value="Take-home"><option value="Hiring manager"><option value="Behavioral"><option value="Onsite / final loop"></datalist>
 <div id="stage"><div id="topbar"><div id="account" hidden></div><div id="theme-toggle" role="group" aria-label="Color theme">
@@ -616,23 +631,25 @@ function route(){
     buttons.append(el("button",{className:"btn apply",textContent:"Mark as applied",title:"Adds this job to the tracker with today's date",onclick:()=>setStatus(j,"applied",true)}));
   }
   const note=el("div",{className:"muted",id:"tailor-note",style:"margin:-4px 0 8px"});
-  const tailorBtn=el("button",{className:"btn",id:"tailor-btn",textContent:TAILOR_LABEL,title:"Uses Claude (Fable 5.1) to rewrite your resume for this posting and write a cover letter, saved as PDFs and editable Word files in the Optimized Resumes folder. Costs a few cents to under a dollar.",onclick:()=>askTailor(j)});
-  buttons.append(tailorBtn);
+  for(const kind of Object.keys(DOCS))buttons.append(el("button",{className:"btn",id:DOCS[kind].btn,textContent:DOCS[kind].label,title:DOCS[kind].tip,onclick:()=>askDoc(kind,j)}));
   buttons.append(el("button",{className:"btn",textContent:"Interview prep",
     title:"How the interview for this role and company usually runs, what to study, and what to ask. Uses Claude once (about 3 cents); the answer is saved in your Interview Prep list, so opening it again is free.",
     onclick:()=>openPrep(j,false)}));
+  buttons.append(el("button",{className:"btn",id:"skills-btn",textContent:SKILLS_LABEL,
+    title:"A list of the skills on your profile that this posting asks for, ready to copy into the application. Uses Claude once (a fraction of a cent).",
+    onclick:()=>skillsFor(j)}));
   buttons.append(j.status==="skipped"
     ?el("button",{className:"btn on",textContent:"Restore from trash",title:"Put this job back in your lists and future reports",onclick:()=>setStatus(j,"new")})
     :el("button",{className:"btn",textContent:"Discard",title:"Move this job to the trash (the trash icon, top left). It stays out of future reports until you restore it.",onclick:()=>setStatus(j,"skipped")}));
   const card=el("div",{className:"card"},saveButton(j),
     el("h1",{textContent:j.title}),el("p",{className:"sub",textContent:j.company+(meta?"  ·  "+meta:"")}),
     el("div",{},el("span",{className:"verdict "+(j.verdict||""),textContent:(j.verdict||"")+" "+j.score}),el("span",{textContent:j.reason||""})),
-    buttons,note,
+    buttons,note,el("div",{id:"skills-box"}),
     ...list("Matched",j.matched,"good"),...list("Missing required",j.missing_required,"bad"),...list("Dealbreakers",j.dealbreakers,"bad"),
     ...(j.resume_angle?[el("h2",{textContent:"Resume angle"}),el("div",{textContent:j.resume_angle})]:[]),
     el("h2",{textContent:"Posting"}),
     el("div",{id:"desc"},...(j.description?markdown(j.description):[el("p",{textContent:"No stored description. Use the button above to read the original posting."})])));
-  $("#main").replaceChildren(card);$("#main").scrollTop=0;paintTailor(j.id);
+  $("#main").replaceChildren(card);$("#main").scrollTop=0;paintDocs(j.id);paintSkills(j.id);
   restoreFormatting(j);
   if(reportName===PREP&&prepJobId!==j.id&&!prepStreaming)openPrep(j,false);   // from the Interview Prep list, show its saved prep
 }
@@ -654,7 +671,13 @@ async function setStatus(j,status,explicit){
     refreshTracker();refreshSaved();refreshTrash();
   }catch(e){fail("Couldn't update that job",e)}
 }
-const TAILOR_LABEL="Tailor resume + cover letter";
+const DOCS={   // the two documents the buttons make; each has its own button, request box text, and progress
+  resume:{label:"Tailor resume",what:"resume",btn:"tailor-btn",path:"/api/tailor",go:"Tailor",
+    placeholder:"e.g. Lead with my Kubernetes work and keep the skills section short",
+    tip:"Uses Claude (Fable 5.1) to rewrite your resume for this posting, saved as a PDF and an editable Word file in the Optimized Resumes folder. Costs a few cents."},
+  letter:{label:"Cover letter",what:"cover letter",btn:"letter-btn",path:"/api/letter",go:"Write",
+    placeholder:"e.g. Mention that I am open to relocating, and keep it under 250 words",
+    tip:"Uses Claude (Fable 5.1) to write a cover letter for this posting, saved as a PDF and an editable Word file in the Optimized Resumes folder. Costs a few cents."}};
 const REQUEST_MAX=2000;
 const BAD_CHARS=/[\u0000-\u0008\u000B-\u001F\u007F-\u009F\u00AD\u200B-\u200F\u2028-\u202E\u2060-\u206F\uE000-\uF8FF\uFEFF\uFFF0-\uFFFF]/g;   // control, invisible, direction-override, private-use
 function wireRequestBox(id){
@@ -666,20 +689,26 @@ function wireRequestBox(id){
   };
   ta.addEventListener("input",update);update();return update;
 }
-const requestBoxes=[wireRequestBox("tailor-resume"),wireRequestBox("tailor-letter")];
-const tailorState={};   // job id -> {running, width, message}; kept here so it survives leaving the job's page and coming back
-function paintTailor(id){
-  const btn=$("#tailor-btn"),note=$("#tailor-note");
-  if(!btn||decodeURIComponent(location.hash.slice(1))!==id)return;   // some other job is on screen
-  const st=tailorState[id]||{};
-  btn.disabled=!!st.running;
-  if(st.running){
-    btn.style.minWidth=st.width+"px";   // keep the button the same size while it shows the spinner
-    btn.replaceChildren(el("span",{className:"spinner"}));btn.setAttribute("aria-label","Working, this takes a minute or two");
-  }else{btn.textContent=TAILOR_LABEL;btn.style.minWidth="";btn.removeAttribute("aria-label")}
-  note.replaceChildren(document.createTextNode(st.message||""),
-    ...((st.files||[]).length?[downloadCard(st.files)]:[]),
-    ...(st.warning?[el("div",{className:"dl-warn",textContent:st.warning})]:[]));
+const requestBox=wireRequestBox("tailor-request");
+const docState={resume:{},letter:{}};   // kind -> job id -> {running, width, files, warning, error}; kept here so it survives leaving the job's page and coming back
+function paintDocs(id){
+  const note=$("#tailor-note");
+  if(!note||decodeURIComponent(location.hash.slice(1))!==id)return;   // some other job is on screen
+  let files=[];const lines=[],warnings=[];
+  for(const [kind,d] of Object.entries(DOCS)){
+    const btn=$("#"+d.btn),st=docState[kind][id]||{};
+    btn.disabled=!!st.running;
+    if(st.running){
+      btn.style.minWidth=st.width+"px";   // keep the button the same size while it shows the spinner
+      btn.replaceChildren(el("span",{className:"spinner"}));btn.setAttribute("aria-label","Working, this takes about a minute");
+    }else{btn.textContent=d.label;btn.style.minWidth="";btn.removeAttribute("aria-label")}
+    if(st.error)lines.push(st.error);
+    files=files.concat(st.files||[]);
+    if(st.warning)warnings.push(st.warning);
+  }
+  note.replaceChildren(...lines.map(t=>el("div",{textContent:t})),
+    ...(files.length?[el("div",{textContent:"Ready to download. The Word files are editable."}),downloadCard(files)]:[]),
+    ...warnings.map(t=>el("div",{className:"dl-warn",textContent:t})));
 }
 function downloadCard(files){
   // the four files, grouped: a row for the resume and a row for the cover letter, each with a PDF and a Word button
@@ -695,23 +724,49 @@ function downloadCard(files){
   });
   return card;
 }
-function askTailor(j){
-  const dlg=$("#tailor-dlg");
-  $("#tailor-for").textContent=j.title+" at "+j.company;$("#tailor-resume").value="";$("#tailor-letter").value="";requestBoxes.forEach(f=>f());
-  dlg.querySelector("form").onsubmit=e=>{if(e.submitter&&e.submitter.value==="ok")tailorJob(j,$("#tailor-resume").value.trim(),$("#tailor-letter").value.trim())};
-  dlg.showModal();$("#tailor-resume").focus();
+function askDoc(kind,j){
+  const d=DOCS[kind],dlg=$("#tailor-dlg"),box=$("#tailor-request");
+  $("#tailor-title").textContent=d.label;$("#tailor-go").textContent=d.go;$("#tailor-for").textContent=j.title+" at "+j.company;
+  box.placeholder=d.placeholder;box.value="";requestBox();
+  dlg.querySelector("form").onsubmit=e=>{if(e.submitter&&e.submitter.value==="ok")makeDoc(kind,j,box.value.trim())};
+  dlg.showModal();box.focus();
 }
-async function tailorJob(j,resume_request,letter_request){
-  const btn=$("#tailor-btn");
-  tailorState[j.id]={running:true,width:btn?btn.offsetWidth:206,message:""};paintTailor(j.id);
-  let message,files=[],warning="";
+async function makeDoc(kind,j,request){
+  const d=DOCS[kind],btn=$("#"+d.btn),state=docState[kind];
+  state[j.id]={running:true,width:btn?btn.offsetWidth:130};paintDocs(j.id);
   try{
-    const d=await post("/api/tailor",{id:j.id,resume_request,letter_request});
-    const long=Object.entries(d.pages).filter(([k,n])=>n>1).map(([k])=>k.replace("_"," "));
-    message="Ready to download. The Word files are editable.";files=d.files.concat(d.word_files||[]);
-    if(long.length)warning="The "+long.join(" and ")+" runs past one page; trim it before sending.";
-  }catch(e){fail("Couldn't write your resume and cover letter",e);message="That didn't finish. "+friendly(e)}
-  tailorState[j.id]={running:false,message,files,warning};paintTailor(j.id);
+    const r=await post(d.path,{id:j.id,request});
+    const long=Object.values(r.pages||{}).some(n=>n>1);
+    state[j.id]={files:r.files.concat(r.word_files||[]),warning:long?"The "+d.what+" runs past one page; trim it before sending.":""};
+  }catch(e){fail("Couldn't write your "+d.what,e);state[j.id]={error:"The "+d.what+" didn't finish. "+friendly(e)}}
+  paintDocs(j.id);
+}
+const SKILLS_LABEL="Skills";
+const skillsState={};   // job id -> {running, width, skills, message}; kept here so the list is still there when you come back to the job
+function paintSkills(id){
+  const btn=$("#skills-btn"),box=$("#skills-box");
+  if(!btn||decodeURIComponent(location.hash.slice(1))!==id)return;   // some other job is on screen
+  const st=skillsState[id]||{};
+  btn.disabled=!!st.running;
+  if(st.running){btn.style.minWidth=st.width+"px";btn.replaceChildren(el("span",{className:"spinner"}));btn.setAttribute("aria-label","Working")}
+  else{btn.textContent=SKILLS_LABEL;btn.style.minWidth="";btn.removeAttribute("aria-label")}
+  if(st.skills){
+    const copy=el("button",{className:"btn",textContent:"Copy all",title:"Copy the skills as one comma-separated line"});
+    copy.onclick=async()=>{
+      try{await navigator.clipboard.writeText(st.skills.join(", "));copy.textContent="Copied"}catch(e){copy.textContent="Select the text and copy it"}
+      setTimeout(()=>{copy.textContent="Copy all"},2000);
+    };
+    box.replaceChildren(el("div",{className:"dl"},
+      el("div",{className:"dl-row"},el("span",{className:"dl-label",textContent:"Skills for this posting"}),copy),
+      el("div",{className:"skill-list"},...st.skills.map(s=>el("span",{className:"chip",textContent:s})))));
+  }else box.replaceChildren(...(st.message?[el("div",{className:"muted",style:"margin:0 0 8px",textContent:st.message})]:[]));
+}
+async function skillsFor(j){
+  const btn=$("#skills-btn");
+  skillsState[j.id]={running:true,width:btn?btn.offsetWidth:70};paintSkills(j.id);
+  try{skillsState[j.id]={skills:(await post("/api/skills",{id:j.id})).skills}}
+  catch(e){fail("Couldn't make your skills list",e);skillsState[j.id]={message:"That didn't finish. "+friendly(e)}}
+  paintSkills(j.id);
 }
 async function reloadJobs(){if(reportName)await openReport(reportName)}
 let lastScored=-1,pollTimer=0;

@@ -12,11 +12,12 @@ import tailor
 from errors import BadModelAnswer, UserError
 
 DEFAULTS = {
-    "per_user_per_day": {"tailor": 6, "tips": 12, "analyze": 6},           # scoring has its own: scoring.max_per_user_per_day
-    "all_users_per_day": {"score": 4000, "tailor": 100, "tips": 300, "analyze": 100},
+    "per_user_per_day": {"tailor": 6, "letter": 6, "tips": 12, "analyze": 6, "skills": 40},           # scoring has its own: scoring.max_per_user_per_day
+    "all_users_per_day": {"score": 4000, "tailor": 100, "letter": 100, "tips": 300, "analyze": 100, "skills": 1000},
     "paused": False,
 }
-WHAT = {"score": "job scorings", "tailor": "resume and cover letter sets", "tips": "interview prep write-ups", "analyze": "resume readings"}
+WHAT = {"score": "job scorings", "tailor": "tailored resumes", "letter": "cover letters", "tips": "interview prep write-ups",
+        "analyze": "resume readings", "skills": "skill lists"}
 PAUSED = "The paid features are paused for a short while. Everything else still works. Try again later."
 
 

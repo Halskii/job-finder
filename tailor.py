@@ -25,39 +25,46 @@ from errors import BadModelAnswer, UserError
 ROOT = Path(__file__).parent
 MODEL = "claude-fable-5-1"   # overridden by `tailor_model:` in config.yaml
 
-SYSTEM = """You tailor one candidate's resume to one job posting and write a cover letter for it. Rules:
-- Use ONLY facts in the candidate's profile and resume. Never claim anything else, and never imply it by echoing the
+# Rules both documents follow. Each prompt below is this text plus the rules for its own document.
+FACTS = """- Use ONLY facts in the candidate's profile and resume. Never claim anything else, and never imply it by echoing the
   posting's keywords. An item in "do_not_assume" is something the candidate does NOT have, and an item the profile
-  does not mention is UNKNOWN. Claim neither.
+  does not mention is UNKNOWN. Claim neither. Do not invent numbers.
 - Never write about what the candidate lacks. Do not say they have not done, have not used, or are still learning something,
-  and do not apologize, hedge, or list gaps, in the resume or the letter. The employer can read the resume. When the posting
+  and do not apologize, hedge, or list gaps. The employer can read the resume. When the posting
   asks for something the candidate does not have, say nothing about it and lead with the closest real experience instead.
-- You may reorder, reword, and choose what to emphasize so the posting's requirements come first where the candidate
-  truly meets them. Keep every job and school in the resume; do not change employers, titles, or dates. Do not invent numbers.
-- Put certifications in the skills list as a labeled line.
-- Write plain, direct sentences with no buzzwords. Keep tense consistent: the summary in present tense, bullets about a
-  past job in past tense.
-- Grammar comes first, above style, in the resume and above all in the letter. Every sentence must be complete and correct,
+- Write plain, direct sentences with no buzzwords.
+- Grammar comes first, above style. Every sentence must be complete and correct,
   with one main idea and subject-verb agreement. Never string items together with repeated "and" or commas (no "I did X and Y
   and Z, and A, and B"). A list of any length is fine when it is punctuated properly: commas between the items and a single
   "and" before the last one ("X, Y, Z, A, and B"). Use "and" once per list, never between clauses that already have a comma. Avoid run-on
-  sentences, comma splices, and sentences longer than about 30 words. Before answering, reread each sentence of the letter
-  and fix any that read as a chain of additions.
+  sentences, comma splices, and sentences longer than about 30 words. Before answering, reread each sentence
+  and fix any that read as a chain of additions."""
+
+RESUME_SYSTEM = f"""You tailor one candidate's resume to one job posting. Rules:
+{FACTS}
+- You may reorder, reword, and choose what to emphasize so the posting's requirements come first where the candidate
+  truly meets them. Keep every job and school in the resume; do not change employers, titles, or dates.
+- Put certifications in the skills list as a labeled line.
+- Keep tense consistent: the summary in present tense, bullets about a past job in past tense.
+- The resume must fit on ONE page: a summary of 2 to 4 sentences, at most 8 bullets per job, and short labeled skill lines.
+Return ONLY a JSON object, no prose, with exactly these keys ("company_name" is the company's name spelled the way the posting spells it):
+{{"company_name": str, "resume": {{"summary": str, "skills": [{{"label": str, "text": str}}],
+            "jobs": [{{"heading": str, "dates": str, "bullets": [str]}}],
+            "education": {{"heading": str, "dates": str, "detail": str}}, "interests": str}}}}"""
+
+LETTER_SYSTEM = f"""You write a cover letter for one candidate applying to one job posting. Rules:
+{FACTS}
 - Keep a steady, professional tone about the whole role. Do not sound especially passionate, excited, or devoted about one
   component of the job description (for example "authentication is what I know best" or "I love building X"), and do not
   single one requirement out for emphasis. Show fit through specifics. Only do this if the candidate's own request asks for it.
 - Keep the cover letter focused on the candidate's strengths and how they align with the job requirements, don't just list things off their resume.
-  Remember, in this role you are a human candidate with a real voice and personality, convince them you are a good fit. 
-- The resume must fit on ONE page: a summary of 2 to 4 sentences, at most 8 bullets per job, and short labeled skill lines.
-- The cover letter is 3 to 5 short paragraphs, under 330 words. 
+  Remember, in this role you are a human candidate with a real voice and personality, convince them you are a good fit.
+- The cover letter is 3 to 5 short paragraphs, under 330 words.
   Say why this role at this company, give the two or three most
   relevant examples from the resume with their specifics, written confidently. Do not repeat the whole resume. Do not write a date, address, greeting, or
   sign-off; those are added for you. Make it flow.
 Return ONLY a JSON object, no prose, with exactly these keys ("company_name" is the company's name spelled the way the posting spells it):
-{"company_name": str, "resume": {"summary": str, "skills": [{"label": str, "text": str}],
-            "jobs": [{"heading": str, "dates": str, "bullets": [str]}],
-            "education": {"heading": str, "dates": str, "detail": str}, "interests": str},
- "cover_letter": {"paragraphs": [str]}}"""
+{{"company_name": str, "cover_letter": {{"paragraphs": [str]}}}}"""
 
 
 def make_client():
@@ -100,19 +107,30 @@ def file_stem(name: str, role: str, company: str) -> str:
     return "_".join(p for p in (short(name, 60), short(role), short(company)) if p)
 
 
-def check(data: dict) -> dict:
-    """The model's answer, or ValueError if a part the layout needs is missing."""
+def check_resume(data: dict) -> dict:
+    """The model's resume answer, or BadModelAnswer if a part the layout needs is missing."""
     try:
-        r, c = data["resume"], data["cover_letter"]
+        r = data["resume"]
         ok = (isinstance(r["summary"], str) and r["summary"].strip()
               and all(isinstance(s["label"], str) and isinstance(s["text"], str) for s in r["skills"])
               and r["jobs"] and all(j["heading"] and isinstance(j["bullets"], list) for j in r["jobs"])
-              and isinstance(r["education"]["heading"], str)
-              and c["paragraphs"] and all(isinstance(p, str) and p.strip() for p in c["paragraphs"]))
+              and isinstance(r["education"]["heading"], str))
     except (KeyError, TypeError):
         ok = False
     if not ok:
-        raise BadModelAnswer("Claude's resume and letter came back incomplete. Please try again.")
+        raise BadModelAnswer("Claude's resume came back incomplete. Please try again.")
+    return data
+
+
+def check_letter(data: dict) -> dict:
+    """The model's cover letter answer, or BadModelAnswer if there is no usable text."""
+    try:
+        paragraphs = data["cover_letter"]["paragraphs"]
+        ok = bool(paragraphs) and all(isinstance(p, str) and p.strip() for p in paragraphs)
+    except (KeyError, TypeError):
+        ok = False
+    if not ok:
+        raise BadModelAnswer("Claude's cover letter came back incomplete. Please try again.")
     return data
 
 
@@ -135,18 +153,17 @@ def clean_request(text) -> str:
     return re.sub(r"\n{3,}", "\n\n", "".join(out)).strip()[:REQUEST_LIMIT]
 
 
-def ask(client, model: str, profile: dict, resume_text: str, row, resume_request: str = "", letter_request: str = "") -> tuple[dict, int, int]:
-    """One call: the tailored resume and cover letter for this job, plus the input and output token counts.
-    The two requests are the candidate's own optional instructions; the rules in SYSTEM still come first."""
+def ask(client, model: str, system: str, profile: dict, resume_text: str, row, label: str, request: str = "") -> tuple[dict, int, int]:
+    """One call for one document (`label` is RESUME or COVER LETTER): the model's JSON answer, plus the input and output token counts.
+    `request` is the candidate's own optional instruction; the rules in `system` still come first."""
     user = (f"CANDIDATE PROFILE (verified):\n{json.dumps(profile, indent=1)}\n\n"
             f"CANDIDATE RESUME:\n{resume_text}\n\n"
             f"JOB POSTING\nCompany: {row['company']}\nTitle: {row['title']}\nLocation: {row['location']}\n\n"
             f"{(row['description'] or '')[:12000]}")
-    for label, text in (("RESUME", resume_request), ("COVER LETTER", letter_request)):
-        text = clean_request(text)
-        if text:
-            user += f"\n\nTHE CANDIDATE'S OWN REQUEST FOR THE {label} (follow it; it overrides the style rules above, but never the rules about facts):\n{text}"
-    msg = client.messages.create(model=model, max_tokens=16000, system=SYSTEM, output_config={"effort": "medium"},
+    request = clean_request(request)
+    if request:
+        user += f"\n\nTHE CANDIDATE'S OWN REQUEST FOR THE {label} (follow it; it overrides the style rules above, but never the rules about facts):\n{request}"
+    msg = client.messages.create(model=model, max_tokens=16000, system=system, output_config={"effort": "medium"},
                                  messages=[{"role": "user", "content": user}])
     if msg.stop_reason == "refusal":
         raise UserError("Claude declined to write this one. Try again, or change your request.", "refused")
@@ -154,7 +171,11 @@ def ask(client, model: str, profile: dict, resume_text: str, row, resume_request
         raise UserError("Claude's answer was cut off before it finished. Please try again.", "cut_off")
     text = "".join(b.text for b in msg.content if b.type == "text")
     usage = getattr(msg, "usage", None)
-    return check(scorer._extract_json(text)), int(getattr(usage, "input_tokens", 0) or 0), int(getattr(usage, "output_tokens", 0) or 0)
+    try:
+        data = scorer._extract_json(text)
+    except ValueError:
+        raise BadModelAnswer(f"Claude's {label.lower()} came back in an unexpected shape. Please try again.") from None
+    return data, int(getattr(usage, "input_tokens", 0) or 0), int(getattr(usage, "output_tokens", 0) or 0)
 
 
 # ------------------------------------------------------------ layout
@@ -383,13 +404,11 @@ def write_one_page(make_page, sizes, out: Path) -> int:
 
 # ------------------------------------------------------------ the whole job
 
-def tailor_job(conn, job_id: str, out_dir: Path | None = None, client=None, resume_request: str = "", letter_request: str = "",
-               home: Path | None = None) -> dict:
-    """Write <Name>_<Role>_<Company>_resume.pdf and ..._cover_letter.pdf for a stored job, plus the same two as editable .docx files.
-    Returns {"files": [pdfs], "word_files": [docx], "folder": str, "pages": {...}, "tokens": {"in": n, "out": n}}."""
-    import main   # imported here so the viewer only loads it when this button is used
+def _prepare(conn, job_id: str, home: Path | None):
+    """What both documents start from: this user's folder, the stored job, their profile and resume, and the name and contact line
+    for the page header. Raises LookupError for an unknown job and a UserError when there is no profile or resume yet."""
+    import main   # imported here so the viewer only loads it when these buttons are used
     home = home or userdata.home(conn.user_id)   # this user's own folder
-    out_dir = out_dir or home / "Optimized Resumes"
     row = conn.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
     if row is None:
         raise LookupError("no such job")
@@ -397,22 +416,46 @@ def tailor_job(conn, job_id: str, out_dir: Path | None = None, client=None, resu
     resume_text, raw = main.load_resume(home), main.read_resume_file(home)
     if not resume_text:
         raise UserError("No resume found. Upload your resume first, then try again.", "no_resume")
-    client = client or make_client()
-    model = config_value("tailor_model", MODEL)
-    data, tok_in, tok_out = ask(client, model, profile, resume_text, row, resume_request, letter_request)
-
     name = profile.get("name") or "Resume"
     lines = [l.strip() for l in raw.splitlines() if l.strip()]
     contact = lines[1] if len(lines) > 1 and "@" in lines[1] else profile.get("location", "")
+    return home, row, profile, resume_text, name, contact
+
+
+def _stem(name: str, row, data: dict) -> tuple[str, str]:
+    """(file name stem, company) for the files: the company as the posting spells it, since the stored name can be a lowercase board slug."""
+    company = str(data.get("company_name") or "").strip() or row["company"]
+    return file_stem(name, row["title"], company), company
+
+
+def tailor_resume(conn, job_id: str, out_dir: Path | None = None, client=None, request: str = "", home: Path | None = None) -> dict:
+    """Write <Name>_<Role>_<Company>_resume.pdf for a stored job, plus the same resume as an editable .docx file.
+    Returns {"files": [pdf], "word_files": [docx], "folder": str, "pages": {"resume": n}, "tokens": {"in": n, "out": n}}."""
+    home, row, profile, resume_text, name, contact = _prepare(conn, job_id, home)
+    out_dir = out_dir or home / "Optimized Resumes"
+    client = client or make_client()
+    data, tok_in, tok_out = ask(client, config_value("tailor_model", MODEL), RESUME_SYSTEM, profile, resume_text, row, "RESUME", request)
+    check_resume(data)
     out_dir.mkdir(exist_ok=True)
-    company = str(data.get("company_name") or "").strip() or row["company"]   # the stored name can be a lowercase board slug
-    stem = file_stem(name, row["title"], company)
-    resume_pdf, letter_pdf = out_dir / f"{stem}_resume.pdf", out_dir / f"{stem}_cover_letter.pdf"
-    r_pages = write_one_page(lambda s: resume_html(name, contact, data["resume"], s), RESUME_SIZES, resume_pdf)
-    l_pages = write_one_page(lambda s: letter_html(name, contact, company, row["title"], data["cover_letter"]["paragraphs"], s),
-                             LETTER_SIZES, letter_pdf)
-    resume_doc, letter_doc = out_dir / f"{stem}_resume.docx", out_dir / f"{stem}_cover_letter.docx"
-    resume_docx(name, contact, data["resume"], resume_doc)
-    letter_docx(name, contact, company, row["title"], data["cover_letter"]["paragraphs"], letter_doc)
-    return {"files": [resume_pdf.name, letter_pdf.name], "word_files": [resume_doc.name, letter_doc.name], "folder": str(out_dir),
-            "pages": {"resume": r_pages, "cover_letter": l_pages}, "tokens": {"in": tok_in, "out": tok_out}}
+    stem, _ = _stem(name, row, data)
+    pdf, doc = out_dir / f"{stem}_resume.pdf", out_dir / f"{stem}_resume.docx"
+    pages = write_one_page(lambda s: resume_html(name, contact, data["resume"], s), RESUME_SIZES, pdf)
+    resume_docx(name, contact, data["resume"], doc)
+    return {"files": [pdf.name], "word_files": [doc.name], "folder": str(out_dir), "pages": {"resume": pages}, "tokens": {"in": tok_in, "out": tok_out}}
+
+
+def write_cover_letter(conn, job_id: str, out_dir: Path | None = None, client=None, request: str = "", home: Path | None = None) -> dict:
+    """Write <Name>_<Role>_<Company>_cover_letter.pdf for a stored job, plus the same letter as an editable .docx file.
+    Returns {"files": [pdf], "word_files": [docx], "folder": str, "pages": {"cover_letter": n}, "tokens": {"in": n, "out": n}}."""
+    home, row, profile, resume_text, name, contact = _prepare(conn, job_id, home)
+    out_dir = out_dir or home / "Optimized Resumes"
+    client = client or make_client()
+    data, tok_in, tok_out = ask(client, config_value("tailor_model", MODEL), LETTER_SYSTEM, profile, resume_text, row, "COVER LETTER", request)
+    check_letter(data)
+    out_dir.mkdir(exist_ok=True)
+    stem, company = _stem(name, row, data)
+    paragraphs = data["cover_letter"]["paragraphs"]
+    pdf, doc = out_dir / f"{stem}_cover_letter.pdf", out_dir / f"{stem}_cover_letter.docx"
+    pages = write_one_page(lambda s: letter_html(name, contact, company, row["title"], paragraphs, s), LETTER_SIZES, pdf)
+    letter_docx(name, contact, company, row["title"], paragraphs, doc)
+    return {"files": [pdf.name], "word_files": [doc.name], "folder": str(out_dir), "pages": {"cover_letter": pages}, "tokens": {"in": tok_in, "out": tok_out}}

@@ -10,13 +10,13 @@ store_max_age_days: 90   # postings clearly older than this are not stored at al
 # Paid calls (scoring, resume tailoring, interview prep, resume reading) allowed per day: for one person, and for the whole site together.
 # Scoring's per-person limit is scoring.max_per_user_per_day. Read on every check, so edits apply at once. paused: true stops them all (a kill switch).
 limits:
-  per_user_per_day: {tailor: 6, tips: 12, analyze: 6}
-  all_users_per_day: {score: 1500, tailor: 40, tips: 100, analyze: 40}
+  per_user_per_day: {tailor: 6, letter: 6, tips: 12, analyze: 6, skills: 30}
+  all_users_per_day: {score: 1500, tailor: 40, letter: 40, tips: 100, analyze: 40, skills: 300}
   paused: false
 request_delay: 0.4        # seconds between HTTP requests (be polite to job boards)
 
 profile_model: claude-sonnet-5-5   # used by `main.py profile` to read resume.pdf
-tailor_model: claude-fable-5-1     # used by the viewer's "Tailor resume + cover letter" button
+tailor_model: claude-fable-5-1     # used by the viewer's "Tailor resume" and "Cover letter" buttons
 onboard_model: claude-haiku-5-5    # used by the profile page to suggest job titles from a resume (the facts come from profile_model)
 tips_model: claude-haiku-5-5       # used by the "Interview prep" button on a job's page
 tips_web_search: true              # let it search the web for what candidates report (about 1 cent per search, plus the extra tokens)
