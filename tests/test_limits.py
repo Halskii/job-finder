@@ -39,7 +39,7 @@ class LimitTests(Base):
             with self.assertRaises(UserError) as ctx:
                 limits.check(conn, "tailor")
         self.assertEqual(ctx.exception.code, "limit_reached")
-        self.assertIn("today's 2 resume and cover letter sets", ctx.exception.message)
+        self.assertIn("today's 2 tailored resumes", ctx.exception.message)
         self.assertTrue(ctx.exception.message.endswith("."))
         conn.close()
 

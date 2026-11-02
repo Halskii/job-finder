@@ -12,20 +12,20 @@ import main
 import sources
 import tailor
 
-ANSWER = {
-    "resume": {"summary": "Engineer.", "skills": [{"label": "Languages", "text": "Python"}],
-               "jobs": [{"heading": "Acme | Engineer", "dates": "2023 - 2026", "bullets": ["Built things."]}],
-               "education": {"heading": "State U | B.S.", "dates": "2023", "detail": "GPA 3.2"}, "interests": "Lifting."},
-    "cover_letter": {"paragraphs": ["I want this job.", "Here is why."]},
-}
+RESUME = {"summary": "Engineer.", "skills": [{"label": "Languages", "text": "Python"}],
+          "jobs": [{"heading": "Acme | Engineer", "dates": "2023 - 2026", "bullets": ["Built things."]}],
+          "education": {"heading": "State U | B.S.", "dates": "2023", "detail": "GPA 3.2"}, "interests": "Lifting."}
+LETTER = {"paragraphs": ["I want this job.", "Here is why."]}
+RESUME_ANSWER = {"resume": RESUME}
+LETTER_ANSWER = {"cover_letter": LETTER}
 
 
-def fake_client(answer=None, stop="end_turn"):
+def fake_client(answer, stop="end_turn"):
     calls = []
 
     def create(**kw):
         calls.append(kw)
-        return SimpleNamespace(stop_reason=stop, content=[SimpleNamespace(type="text", text=json.dumps(answer or ANSWER))],
+        return SimpleNamespace(stop_reason=stop, content=[SimpleNamespace(type="text", text=json.dumps(answer))],
                                usage=SimpleNamespace(input_tokens=1000, output_tokens=500))
     return SimpleNamespace(messages=SimpleNamespace(create=create)), calls
 
@@ -45,19 +45,32 @@ class PromptRuleTests(unittest.TestCase):
     def test_unmentioned_skills_are_unknown_not_a_gap(self):
         """A skill the profile never mentions must not be written up as something the candidate lacks (it once said
         they had not used AI coding tools, which they use daily). Only do_not_assume items may be named as gaps."""
-        self.assertIn("UNKNOWN", tailor.SYSTEM)
-        self.assertNotIn("or not mentioned at all, is something", tailor.SYSTEM)
+        for system in (tailor.RESUME_SYSTEM, tailor.LETTER_SYSTEM):
+            self.assertIn("UNKNOWN", system)
+            self.assertNotIn("or not mentioned at all, is something", system)
 
     def test_no_gushing_about_one_part_of_the_job_unless_asked(self):
-        self.assertIn("Do not sound especially passionate", tailor.SYSTEM)
-        self.assertIn("Only do this if the candidate's own request asks for it", tailor.SYSTEM)
+        self.assertIn("Do not sound especially passionate", tailor.LETTER_SYSTEM)
+        self.assertIn("Only do this if the candidate's own request asks for it", tailor.LETTER_SYSTEM)
 
-    def test_the_letter_never_lists_what_the_candidate_lacks(self):
+    def test_neither_document_lists_what_the_candidate_lacks(self):
         """A letter that said 'I have not built RAG systems or worked in financial services' made a strong candidate look
         merely okay. The employer has the resume; the letter sells and does not confess."""
-        self.assertIn("Never write about what the candidate lacks", tailor.SYSTEM)
-        self.assertNotIn("has not done it", tailor.SYSTEM)
-        self.assertNotIn("named as a gap", tailor.SYSTEM)
+        for system in (tailor.RESUME_SYSTEM, tailor.LETTER_SYSTEM):
+            self.assertIn("Never write about what the candidate lacks", system)
+            self.assertNotIn("has not done it", system)
+            self.assertNotIn("named as a gap", system)
+
+    def test_each_prompt_asks_only_for_its_own_document(self):
+        self.assertIn('"resume"', tailor.RESUME_SYSTEM)
+        self.assertNotIn("cover_letter", tailor.RESUME_SYSTEM)
+        self.assertIn('"cover_letter"', tailor.LETTER_SYSTEM)
+        self.assertNotIn('"resume"', tailor.LETTER_SYSTEM)
+
+    def test_grammar_comes_first_in_both(self):
+        for system in (tailor.RESUME_SYSTEM, tailor.LETTER_SYSTEM):
+            self.assertIn("Grammar comes first", system)
+            self.assertIn("a single\n  \"and\" before the last one", system)
 
 
 class CleanRequestTests(unittest.TestCase):
@@ -79,12 +92,15 @@ class CleanRequestTests(unittest.TestCase):
 
 
 class CheckTests(unittest.TestCase):
-    def test_good_answer_passes_and_missing_parts_fail(self):
-        self.assertIs(tailor.check(ANSWER), ANSWER)
-        for broken in ({}, {"resume": ANSWER["resume"]}, {**ANSWER, "cover_letter": {"paragraphs": []}},
-                       {**ANSWER, "resume": {**ANSWER["resume"], "jobs": []}}):
+    def test_good_answers_pass_and_missing_parts_fail(self):
+        self.assertIs(tailor.check_resume(RESUME_ANSWER), RESUME_ANSWER)
+        self.assertIs(tailor.check_letter(LETTER_ANSWER), LETTER_ANSWER)
+        for broken in ({}, {"resume": {**RESUME, "jobs": []}}, {"resume": {**RESUME, "summary": " "}}):
             with self.assertRaises(ValueError):
-                tailor.check(broken)
+                tailor.check_resume(broken)
+        for broken in ({}, {"cover_letter": {"paragraphs": []}}, {"cover_letter": {"paragraphs": ["ok", " "]}}, RESUME_ANSWER):
+            with self.assertRaises(ValueError):
+                tailor.check_letter(broken)
 
 
 class TailorJobTests(unittest.TestCase):
@@ -101,84 +117,106 @@ class TailorJobTests(unittest.TestCase):
         self.conn.close()
         self.tmp.cleanup()
 
-    def run_job(self, client, job_id="gh:co:1", pages=1):
+    def run_job(self, make, client, job_id="gh:co:1", pages=1, **kw):
         raw = "James Hall\nAustin, TX  |  (555) 010-0000  |  jh@example.com\nSUMMARY\nx"
         with mock.patch.object(main, "load_resume", return_value="RESUME TEXT"), \
                 mock.patch.object(main, "read_resume_file", return_value=raw), \
                 mock.patch.object(tailor, "html_to_pdf", lambda page, out: self.written.append((out.name, page))), \
                 mock.patch.object(tailor, "page_count", return_value=pages):
-            return tailor.tailor_job(self.conn, job_id, out_dir=self.root / "Optimized Resumes", client=client, home=self.root)
+            return make(self.conn, job_id, out_dir=self.root / "Optimized Resumes", client=client, home=self.root, **kw)
 
-    def test_writes_both_files_named_after_the_job(self):
-        client, calls = fake_client()
-        result = self.run_job(client)
-        self.assertEqual(result["files"], ["James_Hall_Software_and_AI_Engineer_CoreWeave_resume.pdf",
-                                           "James_Hall_Software_and_AI_Engineer_CoreWeave_cover_letter.pdf"])
+    def resume(self, client, **kw):
+        return self.run_job(tailor.tailor_resume, client, **kw)
+
+    def letter(self, client, **kw):
+        return self.run_job(tailor.write_cover_letter, client, **kw)
+
+    def test_the_resume_button_writes_only_the_resume(self):
+        client, calls = fake_client(RESUME_ANSWER)
+        result = self.resume(client)
+        self.assertEqual(result["files"], ["James_Hall_Software_and_AI_Engineer_CoreWeave_resume.pdf"])
+        self.assertEqual(result["word_files"], ["James_Hall_Software_and_AI_Engineer_CoreWeave_resume.docx"])
+        self.assertEqual(result["pages"], {"resume": 1})
         self.assertEqual(result["tokens"], {"in": 1000, "out": 500})
-        self.assertEqual(calls[0]["model"], "claude-fable-5-1")
-        pages = dict(self.written)
-        self.assertIn("jh@example.com", pages[result["files"][0]])        # contact line copied from the resume file
-        self.assertIn("Dear CoreWeave Hiring Team,", pages[result["files"][1]])
+        self.assertEqual((len(calls), calls[0]["model"], calls[0]["system"]), (1, "claude-fable-5-1", tailor.RESUME_SYSTEM))
+        self.assertIn("jh@example.com", dict(self.written)[result["files"][0]])        # contact line copied from the resume file
+        self.assertFalse(list((self.root / "Optimized Resumes").glob("*cover_letter*")))
+
+    def test_the_cover_letter_button_writes_only_the_letter(self):
+        client, calls = fake_client(LETTER_ANSWER)
+        result = self.letter(client)
+        self.assertEqual(result["files"], ["James_Hall_Software_and_AI_Engineer_CoreWeave_cover_letter.pdf"])
+        self.assertEqual(result["word_files"], ["James_Hall_Software_and_AI_Engineer_CoreWeave_cover_letter.docx"])
+        self.assertEqual(result["pages"], {"cover_letter": 1})
+        self.assertEqual(calls[0]["system"], tailor.LETTER_SYSTEM)
+        self.assertIn("Dear CoreWeave Hiring Team,", dict(self.written)[result["files"][0]])
+        self.assertFalse(list((self.root / "Optimized Resumes").glob("*_resume.*")))
 
     def test_editable_word_copies_hold_the_same_text(self):
         import docx
-        client, _ = fake_client()
-        result = self.run_job(client)
-        self.assertEqual(result["word_files"], ["James_Hall_Software_and_AI_Engineer_CoreWeave_resume.docx",
-                                                "James_Hall_Software_and_AI_Engineer_CoreWeave_cover_letter.docx"])
         folder = self.root / "Optimized Resumes"
-        resume = [p.text for p in docx.Document(str(folder / result["word_files"][0])).paragraphs]
-        letter = [p.text for p in docx.Document(str(folder / result["word_files"][1])).paragraphs]
+        resume_file = self.resume(fake_client(RESUME_ANSWER)[0])["word_files"][0]
+        letter_file = self.letter(fake_client(LETTER_ANSWER)[0])["word_files"][0]
+        resume = [p.text for p in docx.Document(str(folder / resume_file)).paragraphs]
+        letter = [p.text for p in docx.Document(str(folder / letter_file)).paragraphs]
         self.assertEqual(resume[0], "James Hall")
         self.assertIn("jh@example.com", resume[1])
         self.assertIn("SUMMARY", resume)
         self.assertIn("Dear CoreWeave Hiring Team,", letter)
         self.assertEqual(letter[-1], "James Hall")
-        for text in ANSWER["cover_letter"]["paragraphs"]:
+        for text in LETTER["paragraphs"]:
             self.assertIn(text, letter)
 
     def test_company_name_comes_from_the_posting_when_the_model_gives_it(self):
-        client, _ = fake_client({**ANSWER, "company_name": "CoreWeave"})
-        result = self.run_job(client)
+        result = self.letter(fake_client({**LETTER_ANSWER, "company_name": "CoreWeave"})[0])
         self.assertTrue(result["files"][0].startswith("James_Hall_Software_and_AI_Engineer_CoreWeave_"))
-        self.assertIn("Dear CoreWeave Hiring Team,", dict(self.written)[result["files"][1]])
+        self.assertIn("Dear CoreWeave Hiring Team,", dict(self.written)[result["files"][0]])
 
-    def test_custom_requests_reach_the_prompt_only_when_given(self):
-        client, calls = fake_client()
-        self.run_job(client)
+    def test_a_custom_request_reaches_the_prompt_only_when_given(self):
+        client, calls = fake_client(RESUME_ANSWER)
+        self.resume(client)
         self.assertNotIn("OWN REQUEST", calls[0]["messages"][0]["content"])
-        client, calls = fake_client()
-        with mock.patch.object(main, "load_resume", return_value="R"), \
-                mock.patch.object(main, "read_resume_file", return_value="x"), mock.patch.object(tailor, "html_to_pdf"), \
-                mock.patch.object(tailor, "page_count", return_value=1):
-            tailor.tailor_job(self.conn, "gh:co:1", out_dir=self.root / "o", client=client, home=self.root,
-                              resume_request="Lead with Kubernetes", letter_request="  Keep it short  ")
-        sent = calls[0]["messages"][0]["content"]
-        self.assertIn("OWN REQUEST FOR THE RESUME (follow it; it overrides the style rules above, but never the rules about facts):\nLead with Kubernetes", sent)
-        self.assertIn("OWN REQUEST FOR THE COVER LETTER (follow it; it overrides the style rules above, but never the rules about facts):\nKeep it short", sent)
+        client, calls = fake_client(RESUME_ANSWER)
+        self.resume(client, request="Lead with Kubernetes")
+        self.assertIn("OWN REQUEST FOR THE RESUME (follow it; it overrides the style rules above, but never the rules about facts):\nLead with Kubernetes",
+                      calls[0]["messages"][0]["content"])
+        client, calls = fake_client(LETTER_ANSWER)
+        self.letter(client, request="  Keep it short  ")
+        self.assertIn("OWN REQUEST FOR THE COVER LETTER (follow it; it overrides the style rules above, but never the rules about facts):\nKeep it short",
+                      calls[0]["messages"][0]["content"])
 
     def test_phone_and_email_are_not_sent_to_the_api(self):
-        client, calls = fake_client()
-        self.run_job(client)
-        sent = json.dumps(calls[0]["messages"]) + calls[0]["system"]
-        self.assertNotIn("jh@example.com", sent)
-        self.assertNotIn("555", sent)
-        self.assertIn("RESUME TEXT", sent)
-        self.assertIn("Build agents.", sent)
+        for make, answer in ((self.resume, RESUME_ANSWER), (self.letter, LETTER_ANSWER)):
+            client, calls = fake_client(answer)
+            make(client)
+            sent = json.dumps(calls[0]["messages"]) + calls[0]["system"]
+            self.assertNotIn("jh@example.com", sent)
+            self.assertNotIn("555", sent)
+            self.assertIn("RESUME TEXT", sent)
+            self.assertIn("Build agents.", sent)
 
     def test_an_over_long_page_is_retried_smaller_then_reported(self):
-        client, _ = fake_client()
-        result = self.run_job(client, pages=2)
-        self.assertEqual(result["pages"], {"resume": 2, "cover_letter": 2})
-        self.assertEqual(len(self.written), len(tailor.RESUME_SIZES) + len(tailor.LETTER_SIZES))
+        result = self.resume(fake_client(RESUME_ANSWER)[0], pages=2)
+        self.assertEqual(result["pages"], {"resume": 2})
+        self.assertEqual(len(self.written), len(tailor.RESUME_SIZES))
+        self.written.clear()
+        result = self.letter(fake_client(LETTER_ANSWER)[0], pages=2)
+        self.assertEqual(result["pages"], {"cover_letter": 2})
+        self.assertEqual(len(self.written), len(tailor.LETTER_SIZES))
+
+    def test_an_answer_for_the_wrong_document_is_refused_and_writes_nothing(self):
+        with self.assertRaises(ValueError):
+            self.resume(fake_client(LETTER_ANSWER)[0])
+        with self.assertRaises(ValueError):
+            self.letter(fake_client(RESUME_ANSWER)[0])
+        self.assertEqual(self.written, [])
 
     def test_unknown_job_and_refusal(self):
-        client, _ = fake_client()
-        with self.assertRaises(LookupError):
-            self.run_job(client, job_id="nope")
-        refusing, _ = fake_client(stop="refusal")
-        with self.assertRaises(RuntimeError):
-            self.run_job(refusing)
+        for make, answer in ((self.resume, RESUME_ANSWER), (self.letter, LETTER_ANSWER)):
+            with self.assertRaises(LookupError):
+                make(fake_client(answer)[0], job_id="nope")
+            with self.assertRaises(RuntimeError):
+                make(fake_client(answer, stop="refusal")[0])
 
 
 if __name__ == "__main__":

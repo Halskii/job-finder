@@ -264,32 +264,35 @@ class ServerTests(unittest.TestCase):
         finally:
             report.unlink()
 
-    def test_tailor_endpoint(self):
+    def test_tailor_and_letter_endpoints(self):
         from unittest import mock
-        self.assertEqual(self.post("/api/tailor", {"id": "x"}, ctype="text/plain")[0], 400)
-        self.assertEqual(self.post("/api/tailor", {})[0], 400)
-        with mock.patch.object(viewer, "tailor_for", return_value={"files": ["a.pdf"]}) as f:
-            self.assertEqual(self.post("/api/tailor", {"id": "greenhouse:stripe:1"}), (200, {"files": ["a.pdf"]}))
-            f.assert_called_once_with(self.uid, "greenhouse:stripe:1", "", "")
-        with mock.patch.object(viewer, "tailor_for", return_value={"files": []}) as f:   # the optional requests are passed along, capped
-            self.post("/api/tailor", {"id": "x", "resume_request": "lead with k8s", "letter_request": "y" * 5000})
-            f.assert_called_once_with(self.uid, "x", "lead with k8s", "y" * 2000)
-        with mock.patch.object(viewer, "tailor_for", return_value={"files": []}) as f:   # hidden and control characters never reach the model
-            self.post("/api/tailor", {"id": "x", "resume_request": "a\x00b\u202ec", "letter_request": "ok"})
-            f.assert_called_once_with(self.uid, "x", "abc", "ok")
-        with mock.patch.object(viewer, "tailor_for", side_effect=LookupError("no such job")):
-            self.assertEqual(self.post("/api/tailor", {"id": "nope"})[0], 404)
-        with mock.patch.object(viewer, "tailor_for", side_effect=UserError("No Anthropic API key found. Add it to .env.", "no_api_key")):
-            status, body = self.post("/api/tailor", {"id": "x"})
-            self.assertEqual((status, body["code"]), (422, "no_api_key"))   # something the person can fix
-            self.assertIn("No Anthropic API key", body["error"])
-        with mock.patch.object(viewer, "tailor_for", side_effect=ValueError("secret detail")), self.assertLogs("job-finder", level="ERROR"):
-            status, body = self.post("/api/tailor", {"id": "x"})
-            self.assertEqual((status, body["code"]), (500, "internal"))
-            self.assertNotIn("secret", body["error"])
-            self.assertNotIn("ValueError", body["error"])
-        with web.user_lock("tailor", self.uid):   # a tailoring already running
+        for path, name in (("/api/tailor", "tailor_for"), ("/api/letter", "letter_for")):
+            self.assertEqual(self.post(path, {"id": "x"}, ctype="text/plain")[0], 400)
+            self.assertEqual(self.post(path, {})[0], 400)
+            with mock.patch.object(viewer, name, return_value={"files": ["a.pdf"]}) as f:
+                self.assertEqual(self.post(path, {"id": "greenhouse:stripe:1"}), (200, {"files": ["a.pdf"]}))
+                f.assert_called_once_with(self.uid, "greenhouse:stripe:1", "")
+            with mock.patch.object(viewer, name, return_value={"files": []}) as f:   # the optional request is passed along, capped
+                self.post(path, {"id": "x", "request": "y" * 5000})
+                f.assert_called_once_with(self.uid, "x", "y" * 2000)
+            with mock.patch.object(viewer, name, return_value={"files": []}) as f:   # hidden and control characters never reach the model
+                self.post(path, {"id": "x", "request": "a\x00b\u202ec"})
+                f.assert_called_once_with(self.uid, "x", "abc")
+            with mock.patch.object(viewer, name, side_effect=LookupError("no such job")):
+                self.assertEqual(self.post(path, {"id": "nope"})[0], 404)
+            with mock.patch.object(viewer, name, side_effect=UserError("No Anthropic API key found. Add it to .env.", "no_api_key")):
+                status, body = self.post(path, {"id": "x"})
+                self.assertEqual((status, body["code"]), (422, "no_api_key"))   # something the person can fix
+                self.assertIn("No Anthropic API key", body["error"])
+            with mock.patch.object(viewer, name, side_effect=ValueError("secret detail")), self.assertLogs("job-finder", level="ERROR"):
+                status, body = self.post(path, {"id": "x"})
+                self.assertEqual((status, body["code"]), (500, "internal"))
+                self.assertNotIn("secret", body["error"])
+                self.assertNotIn("ValueError", body["error"])
+        with web.user_lock("tailor", self.uid):   # a resume already being made: another resume waits, but a cover letter can go ahead
             self.assertEqual(self.post("/api/tailor", {"id": "x"})[0], 409)
+            with mock.patch.object(viewer, "letter_for", return_value={"files": []}):
+                self.assertEqual(self.post("/api/letter", {"id": "x"})[0], 200)
 
 
     def test_every_error_response_has_a_sentence_and_a_code_and_never_a_trace(self):
