@@ -307,6 +307,13 @@ class CommandTests(unittest.TestCase):
         saved = boards.load(self.conn)["workday"]
         self.assertEqual(saved, [{"name": "Acme Corp", "host": "acme.wd1.myworkdayjobs.com", "tenant": "acme", "site": "Acme_Careers"}])
 
+    def test_workday_add_can_mark_a_government_employer(self):
+        url = "https://georgia.wd5.myworkdayjobs.com/en-US/TGC"
+        with mock.patch.object(discovery, "check_workday", return_value=1574):
+            main.cmd_workday_add(argparse.Namespace(url=url, name="State of Georgia", gov=True), self.cfg, {}, self.conn)
+        self.assertEqual(boards.load(self.conn)["workday"],
+                         [{"name": "State of Georgia", "host": "georgia.wd5.myworkdayjobs.com", "tenant": "georgia", "site": "TGC", "gov": True}])
+
     def test_workday_add_rejects_a_bad_address(self):
         with mock.patch.object(discovery, "check_workday") as chk:
             main.cmd_workday_add(argparse.Namespace(url="https://example.com", name=None), self.cfg, {}, self.conn)

@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Root>
+<Node>
+    <Action>ADD</Action>
+    <JobId>3030618</JobId>
+    <JobTitle>Speech Language Pathologist</JobTitle>
+    <NumOpenings>1</NumOpenings>
+    <FullPart>F</FullPart>
+    <PostDate>2025-05-23</PostDate>
+    <CloseDate>2026-11-09</CloseDate>
+    <RegTemp>R</RegTemp>
+    <AgencyId>32500</AgencyId>
+    <AgencyDescr>ND Health and Human Services</AgencyDescr>
+    <ContactName>Mary Dusek</ContactName>
+    <ContactPhone>701/352-4549</ContactPhone>
+    <ContactEmail>mdusek@nd.gov</ContactEmail>
+    <JobURL>https://www.cnd.nd.gov/psc/recruit/EMPLOYEE/HRMS/c/HRS_HRAM_FL.HRS_CG_SEARCH_FL.GBL?Page=HRS_APP_JBPST_FL&amp;Action=U&amp;SiteId=11000&amp;FOCUS=Applicant&amp;JobOpeningId=3030618&amp;PostingSeq=1</JobURL>
+    <OMBCareersURL>https://www.nd.gov/omb/public/careers</OMBCareersURL>
+    <BenefitsURL>https://www.nd.gov/omb/public/careers</BenefitsURL>
+    <City>Grafton</City>
+    <State>ND</State>
+    <JobFuncCode>MS</JobFuncCode>
+    <JobFuncDescr>Medical Services</JobFuncDescr>
+    <MinRate>6367</MinRate>
+    <MaxRate>8490</MaxRate>
+    <PayFreq>M</PayFreq>
+    <TravelPercent>0</TravelPercent>
+    <DepartmentID>310841</DepartmentID>
+    <DepartmentDescr>Health Services - Nursing</DepartmentDescr>
+  </Node>
+<Node>
+    <Action>ADD</Action>
+    <JobId>3031645</JobId>
+    <JobTitle>Certified Occupational Therapy Assistant</JobTitle>
+    <NumOpenings>3</NumOpenings>
+    <FullPart>F</FullPart>
+    <PostDate>2025-10-16</PostDate>
+    <CloseDate>2026-11-09</CloseDate>
+    <RegTemp>T</RegTemp>
+    <AgencyId>32500</AgencyId>
+    <AgencyDescr>ND Health and Human Services</AgencyDescr>
+    <ContactName>Faustina McFarland</ContactName>
+    <ContactPhone>701/328-7289</ContactPhone>
+    <ContactEmail>fmcfarland@nd.gov</ContactEmail>
+    <JobURL>https://www.cnd.nd.gov/psc/recruit/EMPLOYEE/HRMS/c/HRS_HRAM_FL.HRS_CG_SEARCH_FL.GBL?Page=HRS_APP_JBPST_FL&amp;Action=U&amp;SiteId=11000&amp;FOCUS=Applicant&amp;JobOpeningId=3031645&amp;PostingSeq=1</JobURL>
+    <OMBCareersURL>https://www.nd.gov/omb/public/careers</OMBCareersURL>
+    <BenefitsURL>https://www.nd.gov/omb/public/careers</BenefitsURL>
+    <City>Grand Forks</City>
+    <State>ND</State>
+    <JobFuncCode>HS</JobFuncCode>
+    <JobFuncDescr>Human Services</JobFuncDescr>
+    <MinRate>21.58</MinRate>
+    <MaxRate>28.77</MaxRate>
+    <PayFreq>H</PayFreq>
+    <TravelPercent>0</TravelPercent>
+    <DepartmentID>325203</DepartmentID>
+    <DepartmentDescr>Northeast BHC</DepartmentDescr>
+  </Node>
+<Node>
+    <Action>ADD</Action>
+    <JobId>93030618</JobId>
+    <JobTitle>Speech Language Pathologist</JobTitle>
+    <NumOpenings>1</NumOpenings>
+    <FullPart>F</FullPart>
+    <PostDate>2025-05-23</PostDate>
+    <CloseDate>2026-10-01</CloseDate>
+    <RegTemp>R</RegTemp>
+    <AgencyId>32500</AgencyId>
+    <AgencyDescr>ND Health and Human Services</AgencyDescr>
+    <ContactName>Mary Dusek</ContactName>
+    <ContactPhone>701/352-4549</ContactPhone>
+    <ContactEmail>mdusek@nd.gov</ContactEmail>
+    <JobURL>https://www.cnd.nd.gov/psc/recruit/EMPLOYEE/HRMS/c/HRS_HRAM_FL.HRS_CG_SEARCH_FL.GBL?Page=HRS_APP_JBPST_FL&amp;Action=U&amp;SiteId=11000&amp;FOCUS=Applicant&amp;JobOpeningId=3030618&amp;PostingSeq=1</JobURL>
+    <OMBCareersURL>https://www.nd.gov/omb/public/careers</OMBCareersURL>
+    <BenefitsURL>https://www.nd.gov/omb/public/careers</BenefitsURL>
+    <City>Grafton</City>
+    <State>ND</State>
+    <JobFuncCode>MS</JobFuncCode>
+    <JobFuncDescr>Medical Services</JobFuncDescr>
+    <MinRate>6367</MinRate>
+    <MaxRate>8490</MaxRate>
+    <PayFreq>M</PayFreq>
+    <TravelPercent>0</TravelPercent>
+    <DepartmentID>310841</DepartmentID>
+    <DepartmentDescr>Health Services - Nursing</DepartmentDescr>
+  </Node>
+</Root>

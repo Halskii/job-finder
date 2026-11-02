@@ -20,7 +20,7 @@ __pycache__/
 *.pyc
 
 # Each user's own files (profile, resume, reports, generated resumes)
-data/
+/data/
 
 # Database dumps (they hold people's data)
 *.dump
