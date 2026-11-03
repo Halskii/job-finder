@@ -1,0 +1,235 @@
+{
+ "items": [
+  {
+   "Keyword": "manager",
+   "Offset": 0,
+   "Limit": 200,
+   "TotalJobsCount": 567,
+   "SiteNumber": "CX_2",
+   "flexFieldsFacet": [
+    {
+     "Name": "AttributeChar6",
+     "Label": "Employment Category"
+    }
+   ],
+   "requisitionList": [
+    {
+     "Id": "2627854",
+     "Title": "FINANCE- Team Leader",
+     "PostedDate": "2026-11-03",
+     "PostingEndDate": null,
+     "Language": "US",
+     "PrimaryLocationCountry": "MY",
+     "GeographyId": 300000082252779,
+     "HotJobFlag": false,
+     "WorkplaceTypeCode": null,
+     "JobFamily": "Finance",
+     "JobFunction": null,
+     "WorkerType": null,
+     "ContractType": null,
+     "ManagerLevel": null,
+     "JobSchedule": null,
+     "JobShift": null,
+     "JobType": null,
+     "StudyLevel": null,
+     "DomesticTravelRequired": null,
+     "InternationalTravelRequired": null,
+     "WorkDurationYears": null,
+     "WorkDurationMonths": null,
+     "WorkHours": null,
+     "WorkDays": null,
+     "LegalEmployer": null,
+     "BusinessUnit": null,
+     "Department": null,
+     "Organization": null,
+     "BusinessUnitId": 300000004283024,
+     "LegalEmployerId": 300000063011275,
+     "OrganizationId": 300000004283024,
+     "ShortDescriptionStr": "Here, we believe there’s not one path to success, we believe in careers that grow with you. Whoever you are or wherever you come from in the world, there’s a place for you at Sherwin-Williams. We provide you with the opportunity to explore ",
+     "PrimaryLocation": "Wilayah Persekutuan Kuala Lumpur, Malaysia",
+     "Distance": 1793664000000.0,
+     "TrendingFlag": false,
+     "BeFirstToApplyFlag": false,
+     "Relevancy": 11.492934226989746,
+     "WorkplaceType": "",
+     "ExternalQualificationsStr": null,
+     "ExternalResponsibilitiesStr": null,
+     "secondaryLocations": [],
+     "requisitionFlexFields": [
+      {
+       "ContextCode": "Global Data Elements",
+       "SegmentCode": "XXSW_Employment_Category",
+       "Prompt": "Employment Category",
+       "Value": "Full-time regular",
+       "DATATYPE": "String"
+      }
+     ]
+    },
+    {
+     "Id": "2626374",
+     "Title": "Sale Representative- Automotive Finishes",
+     "PostedDate": "2026-11-02",
+     "PostingEndDate": null,
+     "Language": "US",
+     "PrimaryLocationCountry": "US",
+     "GeographyId": 300000063076914,
+     "HotJobFlag": false,
+     "WorkplaceTypeCode": null,
+     "JobFamily": "Sales",
+     "JobFunction": null,
+     "WorkerType": null,
+     "ContractType": null,
+     "ManagerLevel": null,
+     "JobSchedule": null,
+     "JobShift": null,
+     "JobType": null,
+     "StudyLevel": null,
+     "DomesticTravelRequired": null,
+     "InternationalTravelRequired": null,
+     "WorkDurationYears": null,
+     "WorkDurationMonths": null,
+     "WorkHours": null,
+     "WorkDays": null,
+     "LegalEmployer": null,
+     "BusinessUnit": null,
+     "Department": null,
+     "Organization": null,
+     "BusinessUnitId": 300000004283064,
+     "LegalEmployerId": 300000004288001,
+     "OrganizationId": 300000137816691,
+     "ShortDescriptionStr": "The Sales Representative is responsible for developing sales in a specific geographic territory. This position prospects for new business and makes calls to existing and new customers for the purpose of selling Automotive Finishes products.",
+     "PrimaryLocation": "Lubbock, TX, United States",
+     "Distance": 1793577600000.0,
+     "TrendingFlag": false,
+     "BeFirstToApplyFlag": false,
+     "Relevancy": 41.67845153808594,
+     "WorkplaceType": "",
+     "ExternalQualificationsStr": null,
+     "ExternalResponsibilitiesStr": null,
+     "secondaryLocations": [
+      {
+       "RequisitionLocationId": 300004992751138,
+       "GeographyNodeId": 100007241480392,
+       "GeographyId": 300000063077010,
+       "Name": "Midland, TX, United States",
+       "CountryCode": "US",
+       "Latitude": 32.00002,
+       "Longitude": -102.07446
+      },
+      {
+       "RequisitionLocationId": 300004992751139,
+       "GeographyNodeId": 100007241489986,
+       "GeographyId": 300000063077011,
+       "Name": "Odessa, TX, United States",
+       "CountryCode": "US",
+       "Latitude": 31.91129,
+       "Longitude": -102.27746
+      },
+      {
+       "RequisitionLocationId": 300004992751140,
+       "GeographyNodeId": 100007241480709,
+       "GeographyId": 300000063077442,
+       "Name": "San Angelo, TX, United States",
+       "CountryCode": "US",
+       "Latitude": 31.46183,
+       "Longitude": -100.44256
+      },
+      {
+       "RequisitionLocationId": 300004992751141,
+       "GeographyNodeId": 100007241487638,
+       "GeographyId": 300000063077215,
+       "Name": "Amarillo, TX, United States",
+       "CountryCode": "US",
+       "Latitude": 35.15965,
+       "Longitude": -101.84851
+      },
+      {
+       "RequisitionLocationId": 300004992751142,
+       "GeographyNodeId": 100007241489832,
+       "GeographyId": 300000063077410,
+       "Name": "Abilene, TX, United States",
+       "CountryCode": "US",
+       "Latitude": 32.44917,
+       "Longitude": -99.74142
+      }
+     ],
+     "requisitionFlexFields": [
+      {
+       "ContextCode": "Global Data Elements",
+       "SegmentCode": "XXSW_Employment_Category",
+       "Prompt": "Employment Category",
+       "Value": "Full-time regular",
+       "DATATYPE": "String"
+      }
+     ]
+    },
+    {
+     "Id": "2628132",
+     "Title": "January 2027 Sales Leadership Development Program (Austin, TX)",
+     "PostedDate": "2026-11-02",
+     "PostingEndDate": null,
+     "Language": "US",
+     "PrimaryLocationCountry": "US",
+     "GeographyId": 300000000296420,
+     "HotJobFlag": false,
+     "WorkplaceTypeCode": null,
+     "JobFamily": "Sales",
+     "JobFunction": null,
+     "WorkerType": null,
+     "ContractType": null,
+     "ManagerLevel": null,
+     "JobSchedule": null,
+     "JobShift": null,
+     "JobType": null,
+     "StudyLevel": null,
+     "DomesticTravelRequired": null,
+     "InternationalTravelRequired": null,
+     "WorkDurationYears": null,
+     "WorkDurationMonths": null,
+     "WorkHours": null,
+     "WorkDays": null,
+     "LegalEmployer": null,
+     "BusinessUnit": null,
+     "Department": null,
+     "Organization": null,
+     "BusinessUnitId": 300000004283064,
+     "LegalEmployerId": 300000004288001,
+     "OrganizationId": 300000004283064,
+     "ShortDescriptionStr": "The Leadership Development Program (LDP) is a 10–12-month program that will expose participants to the various aspects of the Performance Coatings Group.  Participants will complete the program in one assignment, gaining practical, in-depth",
+     "PrimaryLocation": "United States",
+     "Distance": 1793577600000.0,
+     "TrendingFlag": false,
+     "BeFirstToApplyFlag": false,
+     "Relevancy": 34.061988830566406,
+     "WorkplaceType": "",
+     "ExternalQualificationsStr": null,
+     "ExternalResponsibilitiesStr": null,
+     "secondaryLocations": [
+      {
+       "RequisitionLocationId": 300005079994489,
+       "GeographyNodeId": 100007514832294,
+       "GeographyId": 300000063077590,
+       "Name": "Austin, TX, United States",
+       "CountryCode": "US",
+       "Latitude": 30.45414,
+       "Longitude": -97.78254
+      }
+     ],
+     "requisitionFlexFields": [
+      {
+       "ContextCode": "Global Data Elements",
+       "SegmentCode": "XXSW_Employment_Category",
+       "Prompt": "Employment Category",
+       "Value": "Full-time regular",
+       "DATATYPE": "String"
+      }
+     ]
+    }
+   ]
+  }
+ ],
+ "count": 1,
+ "hasMore": false,
+ "limit": 200,
+ "offset": 0
+}

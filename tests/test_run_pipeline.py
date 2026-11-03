@@ -13,7 +13,7 @@ from unittest import mock
 
 import db
 from tests import pgtest
-from tests.govoff import gov_off
+from tests.govoff import gov_off, retail_off
 import main
 import sources
 
@@ -283,7 +283,7 @@ class CollectBoardsTests(unittest.TestCase):
     """Greenhouse / Lever / Ashby boards are read several at a time, results kept in config order."""
 
     CFG = {"sources": {"greenhouse": ["g1", "g2", "g3"], "lever": ["l1"], "ashby": ["a1"]}, "request_delay": 0, "fetch_workers": 4,
-           "feeds": {}, "government": gov_off()}
+           "feeds": {}, "government": gov_off(), "retailers": retail_off()}
 
     def test_order_failures_and_overlap(self):
         lock = threading.Lock()
@@ -318,7 +318,7 @@ class PlatformSwitchTests(unittest.TestCase):
 
     CFG = {"sources": {"greenhouse": ["g1"], "lever": ["l1"], "workday": [{"name": "W", "host": "h", "tenant": "t", "site": "s"}]},
            "request_delay": 0, "fetch_workers": 2, "workday_workers": 2, "titles": ["Software Engineer"],
-           "feeds": {}, "government": gov_off()}
+           "feeds": {}, "government": gov_off(), "retailers": retail_off()}
 
     def collect(self, platforms):
         out, calls = io.StringIO(), []

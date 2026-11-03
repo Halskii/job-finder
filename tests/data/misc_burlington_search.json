@@ -1,0 +1,142 @@
+{
+ "featured_jobs": [],
+ "filters": {},
+ "jobs": [
+  {
+   "GeoLocation": "40.05889, -74.91043",
+   "_version_": 1869446017318912000,
+   "all_locations": [
+    "08010",
+    "Edgewater Park",
+    "New Jersey",
+    "NJ",
+    "Edgewater Park, New Jersey",
+    "United States"
+   ],
+   "buid": 56690,
+   "city_exact": "Edgewater Park",
+   "city_slab_exact": "edgewater-park/new-jersey/usa/jobs::Edgewater Park, NJ",
+   "company_buid_slab": "Burlington::56690",
+   "company_buid_slab_exact": "Burlington::56690",
+   "company_exact": "Burlington",
+   "company_member": true,
+   "company_slab_exact": "burlington/careers::Burlington",
+   "country_ac": "United States",
+   "country_exact": "United States",
+   "country_short_exact": "USA",
+   "country_slab_exact": "usa/jobs::United States",
+   "date_added": "2026-06-30T18:04:08.198Z",
+   "date_new": "2026-05-20T21:03:17Z",
+   "date_updated": "2026-05-20T21:03:17Z",
+   "description": "**Position Overview**\n  \n\n  \nThe Sr. Cybersecurity Engineer serves as a senior technical contributor responsible for designing, implementing, and continuously improving enterprise security engineering capabilities. This role focuses on building scalable, resilient security controls and platforms that protect the organization’s infrastructure, applications, and data. The ideal candidate brings deep hands-on expertise across multiple security domains such as identity, network security, cloud security, endpoint protection, or application security. This role operates with a high degree of autonomy and is responsible for making sound technical decisions in complex environments. The Sr. Cybersecurity Engineer partners closely with cybersecurity operations, identity, infrastructure, cloud, and application teams to influence architecture decisions, embed security into engineering workflows, and ensure controls are effective against real-world threats. This role also provides technical guidance and mentorship to junior engineers without direct people management responsibility.\n  \n\n  \n**A Day In The Life**\n  \n\n  \n**Security Architecture & Engineering Leadership**\n  \n\n  \n+ Design and implement enterprise-grade security engineering solutions across multiple domains.\n  \n+ Lead complex security engineering initiatives requiring deep technical expertise.\n  \n+ Influence architecture decisions to reduce attack surface and systemic risk.\n  \n+ Ensure security controls are resilient, scalable, and aligned with real-world threats.\n  \n+ Establish engineering patterns, standards, and reference architectures.\n  \n+ Review and validate designs and implementations for security effectiveness.\n  \n\n  \n**Strategic Collaboration & Technical Influence**\n  \n\n  \n+ Partner closely with cybersecurity operations, identity, cloud, infrastructure, and application teams to align engineering and operational security.\n  \n+ Provide technical leadership during complex security events requiring engineering intervention.\n  \n+ Represent security engineering in architecture reviews and cross-functional forums.\n  \n+ Advise on risk trade-offs, control design, and platform decisions.\n  \n+ Support long-term security capability planning through engineering insight.\n  \n\n  \n**Automation, Mentorship & Continuous Improvement**\n  \n\n  \n+ Design and build advanced automation and infrastructure-as-code to support security controls.\n  \n+ Drive improvements in reliability, observability, and operational readiness of security platforms.\n  \n+ Mentor junior engineers through technical guidance and design reviews.\n  \n+ Influence tooling strategy through hands-on evaluation and expertise.\n  \n+ Ensure documentation and standards support repeatable, scalable engineering outcomes.\n  \n\n  \n**Scope & Impact**\n  \n\n  \n+ This position plays a critical role in strengthening the organization’s security posture by leading the design and implementation of enterprise-grade security engineering solutions.\n  \n+ The role requires deep technical expertise across multiple security domains and the ability to make high-impact engineering decisions in complex environments.\n  \n+ The Sr. Cybersecurity Engineer is directly accountable for improving the scalability, resilience, and effectiveness of security controls and platforms.\n  \n+ This role influences architecture and design decisions across infrastructure, cloud, identity, endpoint, and application environments.\n  \n+ Decisions made in this role affect enterprise-wide attack surface reduction, control reliability, and long-term operational resilience.\n  \n+ The position drives continuous improvement by translating architectural gaps, operational issues, and emerging threats into engineering enhancements.\n  \n+ This role contributes to the development of security engineering talent by mentoring junior engineers and raising engineering standards without direct people management responsibility.\n  \n+ The role directly supports enterprise risk reduction objectives by ensuring security engineering capabilities evolve with the environment and threat landscape.\n  \n\n  \n**You'll Come With**\n  \n\n  \n+ Bachelor's degree in Computer Science or related field.\n  \n\n  \n+ 7+ years of experience IT\n  \n\n  \n+ 5+ technical cybersecurity experience (3+ years incident response and/or detection engineering)\n  \n+ Expert level knowledge of detection engineering and incident response\n  \n\n  \n+  **At least 1 expert level cybersecurity certification such as CISSP, CASP, CCSP, etc.**\n  \n+ Target Pay Range: $95,000 – $140,000 annually\n  \n\n  \n_This position has a target starting salary range of_  $95,000 – $140,000 annually _. Actual pay is determined by a variety of factors, including but not limited to, qualifications, education, job-related skills, relevant experience, and geographic location_\n  \n\n  \n\\#LI-ML1\n  \n\n  \n**Come join our team. You’re going to like it here!**\n  \n\n  \nYou will enjoy competitive wages, flexible hours, and an associate discount. Burlington’s benefits package includes medical, dental and vision coverage including life and disability insurance. Full-time associates are also eligible for paid time off, paid holidays and a 401(k) plan. We are a rapidly growing brand and provide a variety of training and development opportunities so our associates can grow with us. Our teams work hard and have fun together! Burlington associates make a difference in the lives of customers, colleagues, and the communities where we live and work every day. Burlington Stores, Inc. is an equal opportunity employer committed to workplace diversity.\n  \n\n  \nIndividual pay decisions will be based on a variety of factors, such as but not limited to, qualifications, education, job-related skills, relevant experience, and geographic location.\n  \n\n  \n**Posting Number**  R103419\n  \n\n  \n**Location**  New Jersey-Edgewater Park\n  \n\n  \n**Address**  4287 Route 130 S\n  \n\n  \n**Zip Code**  08010\n  \n\n  \n**Pay Rate**  Salaried\n  \n\n  \n**Career Site Category**  Corporate\n  \n\n  \n**Position Category**  Information Technology\n  \n\n  \n**Job Type**  Full-Time\n  \n\n  \n**Remote Type**  Hybrid\n  \n\n  \n**Evergreen**  No",
+   "django_ct": "seo.joblisting",
+   "django_id": "0",
+   "federal_contractor": false,
+   "guid": "9D7295E78EE0455F911EA72DBD4D0F92",
+   "id": "seo.joblisting.9D7295E78EE0455F911EA72DBD4D0F92",
+   "is_posted": false,
+   "job_category": "Corporate",
+   "job_function": "Information Technology",
+   "job_type": "Full-Time",
+   "lat_long_buid_slab_exact": "40.05889::-74.91043::56690",
+   "location_exact": "Edgewater Park, NJ",
+   "network": true,
+   "on_sites": [
+    0
+   ],
+   "onet_exact": [
+    "15125200",
+    "15121200",
+    "15129908"
+   ],
+   "other": "{\"Remote Type\":\"Hybrid\"}",
+   "reqid": "R103419",
+   "salted_date": "2026-05-20T00:52:13.976Z",
+   "score": 1.715846,
+   "state_short": "NJ",
+   "state_short_exact": "NJ",
+   "title_exact": "Senior Cybersecurity Engineer",
+   "title_slab_exact": "senior-cybersecurity-engineer/jobs-in::Senior Cybersecurity Engineer",
+   "title_slug": "senior-cybersecurity-engineer"
+  },
+  {
+   "GeoLocation": "40.05889, -74.91043",
+   "_version_": 1875776600772968448,
+   "all_locations": [
+    "08010",
+    "Edgewater Park",
+    "New Jersey",
+    "NJ",
+    "Edgewater Park, New Jersey",
+    "United States"
+   ],
+   "buid": 56690,
+   "city_exact": "Edgewater Park",
+   "city_slab_exact": "edgewater-park/new-jersey/usa/jobs::Edgewater Park, NJ",
+   "company_buid_slab": "Burlington::56690",
+   "company_buid_slab_exact": "Burlington::56690",
+   "company_exact": "Burlington",
+   "company_member": true,
+   "company_slab_exact": "burlington/careers::Burlington",
+   "country_ac": "United States",
+   "country_exact": "United States",
+   "country_short_exact": "USA",
+   "country_slab_exact": "usa/jobs::United States",
+   "date_added": "2026-09-08T15:06:03.262Z",
+   "date_new": "2026-05-20T21:03:17Z",
+   "date_updated": "2026-05-20T21:03:17Z",
+   "description": "**Position Overview**\n  \n\n  \nThe DevSecOps Engineer IV serves as the organization’s senior-most technical authority within the DevSecOps and secure software delivery domain. This role is responsible for setting technical direction, architecting enterprise-scale DevSecOps capabilities, and driving long-term maturity of secure software development and application security practices across the organization. The ideal candidate is a deeply experienced DevSecOps and application security practitioner with authoritative expertise in secure software development lifecycle (SSDLC), application security engineering, automation, platform security, and software delivery architecture. This role leads the design of resilient, scalable, and security-focused engineering solutions that align with organizational risk and operational priorities. The DevSecOps Engineer IV partners closely with application development, platform engineering, cybersecurity engineering, cloud, infrastructure, and enterprise architecture teams to influence technology decisions, reduce systemic risk, and ensure security is embedded throughout software delivery and engineering workflows. While not a people manager, this role functions as a principal technical leader responsible for setting engineering standards, mentoring senior engineers, and shaping how secure software delivery is engineered across the enterprise.\n  \n\n  \n**A Day In The Life**\n  \n\n  \n**Enterprise DevSecOps Architecture & Technical Strategy**\n  \n\n  \n+ Define and drive the organization’s DevSecOps architecture and long-term technical strategy.\n  \n+ Architect enterprise-scale secure software delivery and application security capabilities aligned with business, operational, and risk priorities.\n  \n+ Establish DevSecOps engineering standards, secure design patterns, and reference architectures across development and platform environments.\n  \n+ Lead design and implementation of scalable security controls within software delivery pipelines and engineering workflows.\n  \n+ Influence major technology and platform decisions related to secure software development, automation, and application security.\n  \n+ Anticipate emerging application security threats, software delivery risks, and engineering trends and incorporate them into DevSecOps strategy and architecture.\n  \n\n  \n**Executive & Cross-Functional Technical Leadership**\n  \n\n  \n+ Serve as the senior technical authority for DevSecOps and secure software delivery across the enterprise.\n  \n+ Influence enterprise architecture, platform engineering, cloud modernization, and software delivery initiatives through secure engineering expertise.\n  \n+ Represent DevSecOps engineering in architecture reviews, risk discussions, and executive-facing initiatives.\n  \n+ Provide authoritative guidance during high-impact application security incidents, software delivery failures, or platform security events.\n  \n+ Align DevSecOps investments and engineering priorities with organizational objectives and risk appetite.\n  \n\n  \n**Mentorship, Standards & Program Maturity**\n  \n\n  \n+ Mentor senior engineers and shape technical leadership across DevSecOps and application security functions.\n  \n+ Establish and maintain engineering governance, quality standards, and secure development best practices.\n  \n+ Drive continuous improvement of DevSecOps maturity, automation, and secure engineering effectiveness.\n  \n+ Ensure documentation, standards, and engineering patterns support long-term scalability, resilience, and operational sustainability.\n  \n+ Shape engineering culture through technical leadership, collaboration, and promotion of secure-by-design principles without direct people management responsibility.\n  \n\n  \n**You'll Come With**\n  \n\n  \n+ 10+ years of experience IT\n  \n+ 7+ years of hands-on experience in DevSecOps, application security engineering, platform security, or secure software delivery leadership.\n  \n+ Expert-level knowledge of secure software development lifecycle (SSDLC), application security, DevSecOps architecture, and software delivery automation.\n  \n+ Extensive experience designing enterprise-scale secure software delivery and DevSecOps capabilities.\n  \n+ Deep experience integrating security controls and automation into complex engineering and deployment environments.\n  \n+ Advanced expertise in automation, scripting, infrastructure-as-code, and engineering scalability practices.\n  \n+ Experience influencing enterprise architecture and engineering strategy in large or complex organizations.\n  \n+  **At least 1 expert level cybersecurity certification such as CISSP, CASP, CCSP, etc.**\n  \n+ Target Pay Range: $135,000 – $195,000 annually\n  \n\n  \n_This position has a target starting salary range of_  $135,000 – $195,000 annually _. Actual pay is determined by a variety of factors, including but not limited to, qualifications, education, job-related skills, relevant experience, and geographic location._\n  \n\n  \n\\#LI-ML1\n  \n\n  \n**Come join our team. You’re going to like it here!**\n  \n\n  \nYou will enjoy competitive wages, flexible hours, and an associate discount. Burlington’s benefits package includes medical, dental and vision coverage including life and disability insurance. Full-time associates are also eligible for paid time off, paid holidays and a 401(k) plan. We are a rapidly growing brand and provide a variety of training and development opportunities so our associates can grow with us. Our teams work hard and have fun together! Burlington associates make a difference in the lives of customers, colleagues, and the communities where we live and work every day. Burlington Stores, Inc. is an equal opportunity employer committed to workplace diversity.\n  \n\n  \nIndividual pay decisions will be based on a variety of factors, such as but not limited to, qualifications, education, job-related skills, relevant experience, and geographic location.\n  \n\n  \n**Posting Number**  R103415\n  \n\n  \n**Location**  New Jersey-Edgewater Park\n  \n\n  \n**Address**  4287 Route 130 S\n  \n\n  \n**Zip Code**  08010\n  \n\n  \n**Pay Rate**  Salaried\n  \n\n  \n**Career Site Category**  Corporate\n  \n\n  \n**Position Category**  Information Technology\n  \n\n  \n**Job Type**  Full-Time\n  \n\n  \n**Remote Type**  Hybrid\n  \n\n  \n**Evergreen**  No",
+   "django_ct": "seo.joblisting",
+   "django_id": "0",
+   "federal_contractor": false,
+   "guid": "81CFCE3BAFBE41DAAE0AF1A14E029765",
+   "id": "seo.joblisting.81CFCE3BAFBE41DAAE0AF1A14E029765",
+   "is_posted": false,
+   "job_category": "Corporate",
+   "job_function": "Information Technology",
+   "job_type": "Full-Time",
+   "lat_long_buid_slab_exact": "40.05889::-74.91043::56690",
+   "location_exact": "Edgewater Park, NJ",
+   "network": true,
+   "on_sites": [
+    0
+   ],
+   "onet_exact": [
+    "15125200",
+    "15129908",
+    "15121200"
+   ],
+   "other": "{\"Remote Type\":\"Hybrid\"}",
+   "reqid": "R103415",
+   "salted_date": "2026-05-20T08:23:19.168Z",
+   "score": 1.7131065,
+   "state_short": "NJ",
+   "state_short_exact": "NJ",
+   "title_exact": "Lead Cybersecurity DevSecOps Engineer",
+   "title_slab_exact": "lead-cybersecurity-devsecops-engineer/jobs-in::Lead Cybersecurity DevSecOps Engineer",
+   "title_slug": "lead-cybersecurity-devsecops-engineer"
+  }
+ ],
+ "meta": {
+  "canonical": "/jobs/",
+  "filters": [],
+  "request_country": "US",
+  "request_id": null,
+  "rss": "/jobs/feeds/rss?q=engineer",
+  "sort": {
+   "active": "relevance",
+   "options": [
+    "date"
+   ]
+  },
+  "source": "solr"
+ },
+ "pagination": {
+  "has_more_pages": true,
+  "offset": 0,
+  "page": 1,
+  "page_size": 2,
+  "total": 27,
+  "total_pages": 14
+ }
+}

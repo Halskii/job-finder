@@ -1,0 +1,221 @@
+{
+ "items": [
+  {
+   "Keyword": "pharmacy technician",
+   "Offset": 0,
+   "Limit": 200,
+   "TotalJobsCount": 630,
+   "SiteNumber": "CX_1001",
+   "flexFieldsFacet": [
+    {
+     "Name": "AttributeChar1",
+     "Label": "Banner"
+    }
+   ],
+   "requisitionList": [
+    {
+     "Id": "787292",
+     "Title": "Pharmacy Technician",
+     "PostedDate": "2026-11-02",
+     "PostingEndDate": null,
+     "Language": "US",
+     "PrimaryLocationCountry": "US",
+     "GeographyId": 300000002778234,
+     "HotJobFlag": false,
+     "WorkplaceTypeCode": null,
+     "JobFamily": null,
+     "JobFunction": null,
+     "WorkerType": null,
+     "ContractType": null,
+     "ManagerLevel": null,
+     "JobSchedule": null,
+     "JobShift": null,
+     "JobType": null,
+     "StudyLevel": null,
+     "DomesticTravelRequired": null,
+     "InternationalTravelRequired": null,
+     "WorkDurationYears": null,
+     "WorkDurationMonths": null,
+     "WorkHours": null,
+     "WorkDays": null,
+     "LegalEmployer": null,
+     "BusinessUnit": null,
+     "Department": null,
+     "Organization": null,
+     "BusinessUnitId": 300000035162613,
+     "LegalEmployerId": 300000002614001,
+     "OrganizationId": 300000035162613,
+     "ShortDescriptionStr": "3800 W HAPPY VALLEY RD  85310 GLENDALE,AZ MARICOPA UNITED STATES\r\n",
+     "PrimaryLocation": "Glendale, AZ, United States",
+     "Distance": 1793577600000.0,
+     "TrendingFlag": false,
+     "BeFirstToApplyFlag": false,
+     "Relevancy": 102.03158569335938,
+     "WorkplaceType": "",
+     "ExternalQualificationsStr": null,
+     "ExternalResponsibilitiesStr": null,
+     "secondaryLocations": [],
+     "requisitionFlexFields": [
+      {
+       "ContextCode": "Global Data Elements",
+       "SegmentCode": "Banner",
+       "Prompt": "Banner",
+       "Value": "Safeway",
+       "DATATYPE": "String"
+      },
+      {
+       "ContextCode": "Global Data Elements",
+       "SegmentCode": "Minimum Salary",
+       "Prompt": "Minimum Pay Rate",
+       "Value": null,
+       "DATATYPE": "String"
+      },
+      {
+       "ContextCode": "Global Data Elements",
+       "SegmentCode": "Maximum Salary",
+       "Prompt": "Maximum Pay Rate",
+       "Value": null,
+       "DATATYPE": "String"
+      }
+     ]
+    },
+    {
+     "Id": "787929",
+     "Title": "Pharmacy Technician",
+     "PostedDate": "2026-11-02",
+     "PostingEndDate": null,
+     "Language": "US",
+     "PrimaryLocationCountry": "US",
+     "GeographyId": 300000002783487,
+     "HotJobFlag": false,
+     "WorkplaceTypeCode": null,
+     "JobFamily": null,
+     "JobFunction": null,
+     "WorkerType": null,
+     "ContractType": null,
+     "ManagerLevel": null,
+     "JobSchedule": null,
+     "JobShift": null,
+     "JobType": null,
+     "StudyLevel": null,
+     "DomesticTravelRequired": null,
+     "InternationalTravelRequired": null,
+     "WorkDurationYears": null,
+     "WorkDurationMonths": null,
+     "WorkHours": null,
+     "WorkDays": null,
+     "LegalEmployer": null,
+     "BusinessUnit": null,
+     "Department": null,
+     "Organization": null,
+     "BusinessUnitId": 300000035162717,
+     "LegalEmployerId": 300000002618001,
+     "OrganizationId": 300000035162717,
+     "ShortDescriptionStr": "4734 N CUMBERLAND AVE  60656 CHICAGO,IL COOK UNITED STATES\r\n",
+     "PrimaryLocation": "Chicago, IL, United States",
+     "Distance": 1793577600000.0,
+     "TrendingFlag": false,
+     "BeFirstToApplyFlag": true,
+     "Relevancy": 102.03158569335938,
+     "WorkplaceType": "",
+     "ExternalQualificationsStr": null,
+     "ExternalResponsibilitiesStr": null,
+     "secondaryLocations": [],
+     "requisitionFlexFields": [
+      {
+       "ContextCode": "Global Data Elements",
+       "SegmentCode": "Banner",
+       "Prompt": "Banner",
+       "Value": "Jewel Osco",
+       "DATATYPE": "String"
+      },
+      {
+       "ContextCode": "Global Data Elements",
+       "SegmentCode": "Minimum Salary",
+       "Prompt": "Minimum Pay Rate",
+       "Value": "$17.05",
+       "DATATYPE": "String"
+      },
+      {
+       "ContextCode": "Global Data Elements",
+       "SegmentCode": "Maximum Salary",
+       "Prompt": "Maximum Pay Rate",
+       "Value": "$18.55",
+       "DATATYPE": "String"
+      }
+     ]
+    },
+    {
+     "Id": "787947",
+     "Title": "Pharmacy Technician",
+     "PostedDate": "2026-11-02",
+     "PostingEndDate": null,
+     "Language": "US",
+     "PrimaryLocationCountry": "US",
+     "GeographyId": 300000002783174,
+     "HotJobFlag": false,
+     "WorkplaceTypeCode": null,
+     "JobFamily": null,
+     "JobFunction": null,
+     "WorkerType": null,
+     "ContractType": null,
+     "ManagerLevel": null,
+     "JobSchedule": null,
+     "JobShift": null,
+     "JobType": null,
+     "StudyLevel": null,
+     "DomesticTravelRequired": null,
+     "InternationalTravelRequired": null,
+     "WorkDurationYears": null,
+     "WorkDurationMonths": null,
+     "WorkHours": null,
+     "WorkDays": null,
+     "LegalEmployer": null,
+     "BusinessUnit": null,
+     "Department": null,
+     "Organization": null,
+     "BusinessUnitId": 300000035162717,
+     "LegalEmployerId": 300000002618001,
+     "OrganizationId": 300000035162717,
+     "ShortDescriptionStr": "20 S WEBER RD  60446 ROMEOVILLE,IL WILL UNITED STATES\r\n",
+     "PrimaryLocation": "Romeoville, IL, United States",
+     "Distance": 1793577600000.0,
+     "TrendingFlag": false,
+     "BeFirstToApplyFlag": false,
+     "Relevancy": 102.03158569335938,
+     "WorkplaceType": "",
+     "ExternalQualificationsStr": null,
+     "ExternalResponsibilitiesStr": null,
+     "secondaryLocations": [],
+     "requisitionFlexFields": [
+      {
+       "ContextCode": "Global Data Elements",
+       "SegmentCode": "Banner",
+       "Prompt": "Banner",
+       "Value": "Jewel Osco",
+       "DATATYPE": "String"
+      },
+      {
+       "ContextCode": "Global Data Elements",
+       "SegmentCode": "Minimum Salary",
+       "Prompt": "Minimum Pay Rate",
+       "Value": "$15.10",
+       "DATATYPE": "String"
+      },
+      {
+       "ContextCode": "Global Data Elements",
+       "SegmentCode": "Maximum Salary",
+       "Prompt": "Maximum Pay Rate",
+       "Value": "$16.65",
+       "DATATYPE": "String"
+      }
+     ]
+    }
+   ]
+  }
+ ],
+ "count": 1,
+ "hasMore": false,
+ "limit": 200,
+ "offset": 0
+}

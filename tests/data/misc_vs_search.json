@@ -1,0 +1,365 @@
+{
+ "totalHits": 4,
+ "nextPageToken": null,
+ "searchResults": [
+  {
+   "summary": {
+    "job_summary": "The Project Engineer(Indsutrial Engineer II) is responsible for supporting strategic and tactical support initiatives that drive capability and efficiency in the Logistics and Supply Chain operations and infrastructure. Primary responsibilities are focused on both retail and direct-to-consumer fulfillment operations. These include: facility design and utilization planning, applied Industrial Engineering principles, engineered labor standards, material handling automation design and implementation, and strong project management skills.",
+    "job_title_snippet": "Industrial <b>Engineer</b> II.",
+    "search_text_snippet": "... <b>Engineer</b>(Indsutrial <b>Engineer</b> II) is responsible for supporting strategic and tactical support initiatives that drive capability and efficiency in the Logistics and Supply Chain operations and ..."
+   },
+   "job": {
+    "name": "projects/talent-cloud-jobs-prod/tenants/4f3343ee-2900-0000-0000-009477c2ccf2/jobs/117436224603333318",
+    "company_name": "Victorias Secret & Co",
+    "google_categories": [
+     "SCIENCE_AND_ENGINEERING",
+     "MANUFACTURING_AND_WAREHOUSE"
+    ],
+    "google_locations": [
+     {
+      "city": "Pataskala",
+      "state": "OH",
+      "zip": "43068",
+      "country": "US",
+      "address": "Pataskala, OH 43068, USA",
+      "location": [
+       -82.7886395,
+       39.9518394
+      ]
+     }
+    ],
+    "scout_orgid": 2391,
+    "id": 23670279,
+    "xc_id": null,
+    "sf_id": null,
+    "entity_status": null,
+    "ref": "04LEV",
+    "ats_portalid": "SuccesFactors",
+    "clientid": "04LEV",
+    "language": "en-US",
+    "title": "Industrial Engineer II",
+    "primary_category": "Maintenance and Engineering",
+    "addtnl_categories": [
+     "Maintenance and Engineering"
+    ],
+    "primary_city": "Reynoldsburg",
+    "primary_state": "OH",
+    "primary_zip": "43068",
+    "primary_country": "US",
+    "primary_address": null,
+    "primary_location": [
+     -82.7824,
+     39.9621
+    ],
+    "addtnl_locations": [],
+    "description": "<div data-field=\"description\" class=\"jd-description\"><strong>Description</strong><p /><p class=\"MsoNormal\">The Project Engineer(Indsutrial Engineer II) is responsible for supporting strategic and tactical support initiatives that drive capability and efficiency in the Logistics and Supply Chain operations and infrastructure. Primary responsibilities are focused on both retail and direct-to-consumer fulfillment operations. These include: facility design and utilization planning, applied Industrial Engineering principles, engineered labor standards, material handling automation design and implementation, and strong project management skills.</p></div><div data-field=\"salaryInfo\" class=\"jd-salaryInfo\"><strong>Minimum Salary:</strong> $76,700.00<br /><strong>Maximum Salary:</strong> $101,955.00</div><p /><div data-field=\"disclaimer\" class=\"jd-disclaimer\"><p>VS&Co provides a range of compensation for this role as shown. Your actual salary will be determined by a number of factors, including: your specific skills and experience, geographic region, or other relevant factors.</p></div><div data-field=\"qualifications\" class=\"jd-qualifications\"><strong>Qualifications</strong><p class=\"MsoNormal\"><strong>Qualifications:</strong></p><ul style=\"margin-top:0in;\" type=\"disc\"><li class=\"MsoNormal\" style=\"mso-list:l0 level1 lfo2;tab-stops:list .5in;\">Bachelor of Science degree in Industrial Engineering or related discipline</li><li class=\"MsoNormal\" style=\"mso-list:l0 level1 lfo2;tab-stops:list .5in;\">3-5 years of experience in a distribution or manufacturing engineering role</li><li class=\"MsoNormal\" style=\"mso-list:l0 level1 lfo2;tab-stops:list .5in;\">Effective communication and cross functional team collaboration skills</li><li class=\"MsoNormal\" style=\"mso-list:l0 level1 lfo2;t</ul></div>",
+    "salary": "$101,955.00",
+    "job_type": "$76,700.00",
+    "travel": "$101,955.00",
+    "level": "Regular",
+    "relocation": null,
+    "education": null,
+    "years_experience": null,
+    "open_positions": null,
+    "brand": "Victoria's Secret",
+    "department": null,
+    "shift": null,
+    "recruiter": null,
+    "parent_category": "Maintenance and Engineering",
+    "sub_category": null,
+    "business_unit": null,
+    "is_internal": null,
+    "employment_type": "Full-time",
+    "schedule": null,
+    "compliment": "United States-Ohio-Reynoldsburg",
+    "store_id": "Distribution Center Dc5",
+    "close_date": "2036-08-05T15:02:31",
+    "open_date": "2026-08-05T15:02:31",
+    "url": "https://careers.victoriassecret.com/en/job/23670279/industrial-engineer-ii-reynoldsburg-oh/",
+    "seo_url": "https://vsco.taleo.net/careersection/1_VSS_PROF/jobapply.ftl?lang=en&job=04LEV&csNo=11002",
+    "location_type": "On-site",
+    "importance": 0.0,
+    "commute": null,
+    "freshness": 13987622,
+    "metadata": null,
+    "timestamp": "1793666325",
+    "easy_apply": [],
+    "internal_url": null,
+    "multi_select1": [],
+    "multi_select2": [],
+    "erp_eligible": null,
+    "erp_bonus": null,
+    "custom_fields": {}
+   }
+  },
+  {
+   "summary": {
+    "job_summary": "The Store Manager has the primary responsibility of driving top-line sales by leading the sales floor, coaching and development of the team, performance management, and selling. In addition, the Store Manager ensures operational excellence through visual merchandising, payroll management, inventory control, and delivering on our operational standards. The Store Manager drives consistency in performance and execution through business insights and actions to deliver results. It is their responsibility to coach and develop leaders within their area of responsibility by being a content expert in all areas of the store: brand, team and operations. They also own or oversee the weekly schedules of leaders and associates",
+    "job_title_snippet": "<b>Store Manager</b>-Scottsdale Fashion Square.",
+    "search_text_snippet": "... <b>Store Manager</b> has the primary responsibility of driving top-line sales by leading the sales floor, coaching and development of the team, performance management, and selling. In addition, the Store ..."
+   },
+   "job": {
+    "name": "projects/talent-cloud-jobs-prod/tenants/4f3343ee-2900-0000-0000-009477c2ccf2/jobs/72614372714652358",
+    "company_name": "Victorias Secret & Co",
+    "google_categories": [
+     "SALES_AND_RETAIL",
+     "MANAGEMENT"
+    ],
+    "google_locations": [
+     {
+      "city": "Scottsdale",
+      "state": "AZ",
+      "zip": "85251",
+      "country": "US",
+      "address": "7014 E Camelback Rd, Scottsdale, AZ 85251, USA",
+      "location": [
+       -111.9303429,
+       33.5033535
+      ]
+     }
+    ],
+    "scout_orgid": 2391,
+    "id": 23742655,
+    "xc_id": null,
+    "sf_id": null,
+    "entity_status": null,
+    "ref": "04LXV",
+    "ats_portalid": "SuccesFactors",
+    "clientid": "04LXV",
+    "language": "en-US",
+    "title": "Store Manager-Scottsdale Fashion Square",
+    "primary_category": "Store: Management",
+    "addtnl_categories": [
+     "Store: Management"
+    ],
+    "primary_city": "Scottsdale",
+    "primary_state": "AZ",
+    "primary_zip": "85251",
+    "primary_country": "US",
+    "primary_address": "7014 East Camelback Road",
+    "primary_location": [
+     -111.9303429,
+     33.5033535
+    ],
+    "addtnl_locations": [],
+    "description": "<div data-field=\"description\" class=\"jd-description\"><strong>Description</strong><p /><div><span style=\"font-size: 13px;\"><strong>A Victoria’s Secret & Co Store Manager</strong> is a values-based leader who delivers exceptional customer and associate experiences to drive and grow top-line sales at Victoria’s Secret.  This role reports to the District Manager.</span></div>\r\n<div><span style=\"font-size: 13px;\"> </span></div>\r\n<div><strong><span style=\"font-size: 13px;\">Primary Responsibility:</span></strong></div>\r\n<div><span style=\"font-size: 13px;\"> </span></div>\r\n<div><span style=\"font-size: 13px;\">The Store Manager has the primary responsibility of driving top-line sales by leading the sales floor, coaching and development of the team, performance management, and selling. In addition, the Store Manager ensures operational excellence through visual merchandising, payroll management, inventory control, and delivering on our operational standards.  The Store Manager drives consistency in performance and execution through business insights and actions to deliver results.  It is their responsibility to coach and develop leaders within their area of responsibility by being a content expert in all areas of the store: brand, team and operations. They also own or oversee the weekly schedules of leaders and associates</span></div>\r\n<div><span style=\"font-size: 13px;\"> </span></div>\r\n<div><span style=\"font-size: 13px;\"> </span></div>\r\n<div><span style=\"font-size: 13px;\"> </span></div>\r\n<div><strong><span style=\"font-size: 13px;\">Direct Reports as assigned (based on store volume):</span></strong></div>\r\n<div><span style=\"font-size: 13px;\"> </span><span style=\"font-size: 13px;\">Customer Experience Manager(s), Customer Experience Leads(s), and Associates</span></div>\r\n<div><span style=\"font-size: 13px;\"> </span></div>\r\n<div><span style=\"font-size: 13px;\"> </span></div>\r\n<div><strong><span style=\"font-size: 13px;\">All Store Leadership Team responsibilities include:</span></strong></div>\r\n<ul>\r\n<li><span style=\"font-size: 13px;\">Leading and demonstrating company values within the store.</span></li>\r\n<li><span style=\"font-size: 13px;\">Delivering exceptional customer experiences in the role of the Head Coach through coaching, zoning, team selling and personally selling. </span></li>\r\n<li><span style=\"font-size: 13px;\">Conducting associate observations and associate coaching</span></li>\r\n<li><span style=\"font-size: 13px;\">Displaying an understanding of all associate roles and ensuring all roles work for the good of the team and the customer.</span></li>\r\n<li><span style=\"font-size: 13px;\">Linking results to behaviors and actions to drive top-line sales.</span></li>\r\n<li><span style=\"font-size: 13px;\">Independently managing labor hours within the store to drive top line sales and profit.</span></li>\r\n<li><span style=\"font-size: 13px;\">Owning the overall appearance and presentation of the brand by maintaining visual merchandising standards.</span></li>\r\n<li><span style=\"font-size: 13px;\">Collaborating with Sales Leadership Teams to ensure seamless communication and execution of required actions of the brand.</span></li>\r\n<li><span style=\"font-size: 13px;\">Demonstrating and leading company policy and procedures.</span></li>\r\n<li><span style=\"font-size: 13px;\">Additional duties as assigned, including but not limited to: Floorset mapping and execution, Product launch support, onboarding, and shipment processing.</span></li>\r\n<li><span style=\"font-size: 13px;\">This role requires the ability to lift and carry up to 40 pounds, as well as frequent bending, stretching, walking and prolonged standing as part of your daily tasks</span></li>\r\n</ul>\r\n<div></div>\r\n<div><span style=\"font-size: 13px;\"> </span></div>\r\n<div><span style=\"font-size: 13px;\">Click <a target=\"_blank\" rel=\"noopener noreferrer\" href=\"https://careers.victoriassecret.com/en/about-us/benefits/\">here</a> for benefit details related to this position.</span></div></div></div><div data-field=\"salaryInfo\" class=\"jd-salaryInfo\"><strong>Minimum Salary:</strong> $90,800.00<br /><strong>Maximum Salary:</strong> $109,000.00</div><p /><div data-field=\"disclaimer\" class=\"jd-disclaimer\"><p>VS&Co provides a range of compensation for this role as shown. Your actual salary will be determined by a number of factors, including: your specific skills and experience, geographic region, or other relevant factors.</p></div><div data-field=\"qualifications\" class=\"jd-qualifications\"><strong>Qualifications</strong><ul>\r\n<li><span style=\"font-size: 13px;\">Passion for Victoria’s Secret Brand.</span></li>\r\n<li><span style=\"font-size: 13px;\">Ability to improve customer satisfaction and drive customer loyalty.</span></li>\r\n<li><span style=\"font-size: 13px;\">Experience reviewing business reports and insights and taking immediate and deliberate action to achieve results.<br></span></li>\r\n<li><span style=\"font-size: 13px;\">A sense of self-awareness with an interest in seeking feedback to improve and develop.</span></li>\r\n<li><span style=\"font-size: 13px;\">Experience selecting and developing direct reports to the next lev</ul></div>",
+    "salary": "$109,000.00",
+    "job_type": "$90,800.00",
+    "travel": "$109,000.00",
+    "level": "Regular",
+    "relocation": null,
+    "education": null,
+    "years_experience": null,
+    "open_positions": null,
+    "brand": "Victoria's Secret",
+    "department": null,
+    "shift": null,
+    "recruiter": null,
+    "parent_category": "Store: Management",
+    "sub_category": null,
+    "business_unit": null,
+    "is_internal": null,
+    "employment_type": "Full-time",
+    "schedule": null,
+    "compliment": "United States-Arizona-Scottsdale",
+    "store_id": "410351/00467/Scottsdale Fashion Square",
+    "close_date": "2036-08-20T19:02:32",
+    "open_date": "2026-08-20T19:02:32",
+    "url": "https://careers.victoriassecret.com/en/job/23742655/store-manager-scottsdale-fashion-square-scottsdale-az/",
+    "seo_url": "https://vsco.taleo.net/careersection/1_VSS_PROF/jobapply.ftl?lang=en&job=04LXV&csNo=11002",
+    "location_type": "On-site",
+    "importance": 0.0,
+    "commute": null,
+    "freshness": 14009462,
+    "metadata": null,
+    "timestamp": "1793666683",
+    "easy_apply": [],
+    "internal_url": null,
+    "multi_select1": [],
+    "multi_select2": [],
+    "erp_eligible": null,
+    "erp_bonus": null,
+    "custom_fields": {}
+   }
+  },
+  {
+   "summary": {
+    "job_summary": "The Store Manager has the primary responsibility of driving top-line sales by leading the sales floor, coaching and development of the team, performance management, and selling. In addition, the Store Manager ensures operational excellence through visual merchandising, payroll management, inventory control, and delivering on our operational standards. The Store Manager drives consistency in performance and execution through business insights and actions to deliver results. It is their responsibility to coach and develop leaders within their area of responsibility by being a content expert in all areas of the store: brand, team and operations. They also own or oversee the weekly schedules of leaders and associates",
+    "job_title_snippet": "<b>Store Manager</b>-Mesa Mall.",
+    "search_text_snippet": "... <b>Store Manager</b> has the primary responsibility of driving top-line sales by leading the sales floor, coaching and development of the team, performance management, and selling. In addition, the Store ..."
+   },
+   "job": {
+    "name": "projects/talent-cloud-jobs-prod/tenants/4f3343ee-2900-0000-0000-009477c2ccf2/jobs/142655732741743302",
+    "company_name": "Victorias Secret & Co",
+    "google_categories": [
+     "SALES_AND_RETAIL",
+     "MANAGEMENT"
+    ],
+    "google_locations": [
+     {
+      "city": "Grand Junction",
+      "state": "CO",
+      "zip": "81505",
+      "country": "US",
+      "address": "2424 US-6, Grand Junction, CO 81505, USA",
+      "location": [
+       -108.6030896,
+       39.0921722
+      ]
+     }
+    ],
+    "scout_orgid": 2391,
+    "id": 24081468,
+    "xc_id": null,
+    "sf_id": null,
+    "entity_status": null,
+    "ref": "04OGB",
+    "ats_portalid": "SuccesFactors",
+    "clientid": "04OGB",
+    "language": "en-US",
+    "title": "Store Manager-Mesa Mall",
+    "primary_category": "Store: Management",
+    "addtnl_categories": [
+     "Store: Management"
+    ],
+    "primary_city": "Grand Junction",
+    "primary_state": "CO",
+    "primary_zip": "81505",
+    "primary_country": "US",
+    "primary_address": "2424 HIGHWAY 6 AND 50",
+    "primary_location": [
+     -108.6030896,
+     39.0921722
+    ],
+    "addtnl_locations": [],
+    "description": "<div data-field=\"description\" class=\"jd-description\"><strong>Description</strong><p /><div><span style=\"font-size: 13px;\"><strong>A Victoria’s Secret & Co Store Manager</strong> is a values-based leader who delivers exceptional customer and associate experiences to drive and grow top-line sales at Victoria’s Secret.  This role reports to the District Manager.</span></div>\r\n<div><span style=\"font-size: 13px;\"> </span></div>\r\n<div><strong><span style=\"font-size: 13px;\">Primary Responsibility:</span></strong></div>\r\n<div><span style=\"font-size: 13px;\"> </span></div>\r\n<div><span style=\"font-size: 13px;\">The Store Manager has the primary responsibility of driving top-line sales by leading the sales floor, coaching and development of the team, performance management, and selling. In addition, the Store Manager ensures operational excellence through visual merchandising, payroll management, inventory control, and delivering on our operational standards.  The Store Manager drives consistency in performance and execution through business insights and actions to deliver results.  It is their responsibility to coach and develop leaders within their area of responsibility by being a content expert in all areas of the store: brand, team and operations. They also own or oversee the weekly schedules of leaders and associates</span></div>\r\n<div><span style=\"font-size: 13px;\"> </span></div>\r\n<div><span style=\"font-size: 13px;\"> </span></div>\r\n<div><span style=\"font-size: 13px;\"> </span></div>\r\n<div><strong><span style=\"font-size: 13px;\">Direct Reports as assigned (based on store volume):</span></strong></div>\r\n<div><span style=\"font-size: 13px;\"> </span><span style=\"font-size: 13px;\">Customer Experience Manager(s), Customer Experience Leads(s), and Associates</span></div>\r\n<div><span style=\"font-size: 13px;\"> </span></div>\r\n<div><span style=\"font-size: 13px;\"> </span></div>\r\n<div><strong><span style=\"font-size: 13px;\">All Store Leadership Team responsibilities include:</span></strong></div>\r\n<ul>\r\n<li><span style=\"font-size: 13px;\">Leading and demonstrating company values within the store.</span></li>\r\n<li><span style=\"font-size: 13px;\">Delivering exceptional customer experiences in the role of the Head Coach through coaching, zoning, team selling and personally selling. </span></li>\r\n<li><span style=\"font-size: 13px;\">Conducting associate observations and associate coaching</span></li>\r\n<li><span style=\"font-size: 13px;\">Displaying an understanding of all associate roles and ensuring all roles work for the good of the team and the customer.</span></li>\r\n<li><span style=\"font-size: 13px;\">Linking results to behaviors and actions to drive top-line sales.</span></li>\r\n<li><span style=\"font-size: 13px;\">Independently managing labor hours within the store to drive top line sales and profit.</span></li>\r\n<li><span style=\"font-size: 13px;\">Owning the overall appearance and presentation of the brand by maintaining visual merchandising standards.</span></li>\r\n<li><span style=\"font-size: 13px;\">Collaborating with Sales Leadership Teams to ensure seamless communication and execution of required actions of the brand.</span></li>\r\n<li><span style=\"font-size: 13px;\">Demonstrating and leading company policy and procedures.</span></li>\r\n<li><span style=\"font-size: 13px;\">Additional duties as assigned, including but not limited to: Floorset mapping and execution, Product launch support, onboarding, and shipment processing.</span></li>\r\n<li><span style=\"font-size: 13px;\">This role requires the ability to lift and carry up to 40 pounds, as well as frequent bending, stretching, walking and prolonged standing as part of your daily tasks</span></li>\r\n</ul>\r\n<div></div>\r\n<div><span style=\"font-size: 13px;\"> </span></div>\r\n<div><span style=\"font-size: 13px;\">Click <a target=\"_blank\" rel=\"noopener noreferrer\" href=\"https://careers.victoriassecret.com/en/about-us/benefits/\">here</a> for benefit details related to this position.</span></div></div></div><div data-field=\"salaryInfo\" class=\"jd-salaryInfo\"><strong>Minimum Salary:</strong> $66,400.00<br /><strong>Maximum Salary:</strong> $79,700.00</div><p /><div data-field=\"disclaimer\" class=\"jd-disclaimer\"><p>VS&Co provides a range of compensation for this role as shown. Your actual salary will be determined by a number of factors, including: your specific skills and experience, geographic region, or other relevant factors.</p></div><div data-field=\"qualifications\" class=\"jd-qualifications\"><strong>Qualifications</strong><ul><li><span style=\"font-size:13px;\">Passion for Victoria’s Secret Brand.</span></li><li><span style=\"font-size:13px;\">Ability to improve customer satisfaction and drive customer loyalty.</span></li><li><span style=\"font-size:13px;\">Experience reviewing business reports and insights and taking immediate and deliberate action to achieve results.</span><br> </li><li><span style=\"font-size:13px;\">A sense of self-awareness with an interest in seeking feedback to improve and develop.</span></li><li><span style=\"font-size:13px;\">Experience selecting and developing direct reports to the next level and creatin</ul></div>",
+    "salary": "$79,700.00",
+    "job_type": "$66,400.00",
+    "travel": "$79,700.00",
+    "level": "Regular",
+    "relocation": null,
+    "education": null,
+    "years_experience": null,
+    "open_positions": null,
+    "brand": "Victoria's Secret",
+    "department": null,
+    "shift": null,
+    "recruiter": null,
+    "parent_category": "Store: Management",
+    "sub_category": null,
+    "business_unit": null,
+    "is_internal": null,
+    "employment_type": "Full-time",
+    "schedule": null,
+    "compliment": "United States-Colorado-Grand Junction",
+    "store_id": "710345/01101/Mesa Mall",
+    "close_date": "2036-10-28T15:02:36",
+    "open_date": "2026-10-28T15:02:36",
+    "url": "https://careers.victoriassecret.com/en/job/24081468/store-manager-mesa-mall-grand-junction-co/",
+    "seo_url": "https://vsco.taleo.net/careersection/1_VSS_PROF/jobapply.ftl?lang=en&job=04OGB&csNo=11002",
+    "location_type": "On-site",
+    "importance": 0.0,
+    "commute": null,
+    "freshness": 14108582,
+    "metadata": null,
+    "timestamp": "1793666683",
+    "easy_apply": [],
+    "internal_url": null,
+    "multi_select1": [],
+    "multi_select2": [],
+    "erp_eligible": null,
+    "erp_bonus": null,
+    "custom_fields": {}
+   }
+  },
+  {
+   "summary": {
+    "job_summary": "We will consider for employment all qualified applicants, including those with arrest records, conviction records, or other criminal histories, in a manner consistent with the requirements of any applicable state and local laws. Please see links: California Fair Chance Act , Los Angeles Fair Chance Initiative for Hiring Ordinance , Philadelphia Fair Chance Law , San Francisco Fair Chance Ordinance , Los Angeles County Fair Chance Ordinance",
+    "job_title_snippet": "Cafe <b>Cashier</b>.",
+    "search_text_snippet": "... <b>Cashier</b> / Cook is responsible for preparing and serving quality food while providing outstanding customer service in a fast-paced café and food service environment. This role combines food ..."
+   },
+   "job": {
+    "name": "projects/talent-cloud-jobs-prod/tenants/4f3343ee-2900-0000-0000-009477c2ccf2/jobs/114826990363517638",
+    "company_name": "Victorias Secret & Co",
+    "google_categories": [
+     "RESTAURANT_AND_HOSPITALITY"
+    ],
+    "google_locations": [
+     {
+      "city": "Pataskala",
+      "state": "OH",
+      "zip": "43068",
+      "country": "US",
+      "address": "Pataskala, OH 43068, USA",
+      "location": [
+       -82.7886395,
+       39.9518394
+      ]
+     }
+    ],
+    "scout_orgid": 2391,
+    "id": 24084964,
+    "xc_id": null,
+    "sf_id": null,
+    "entity_status": null,
+    "ref": "04OGV",
+    "ats_portalid": "SuccesFactors",
+    "clientid": "04OGV",
+    "language": "en-US",
+    "title": "Cafe Cashier",
+    "primary_category": "Cafe",
+    "addtnl_categories": [
+     "Cafe"
+    ],
+    "primary_city": "Reynoldsburg",
+    "primary_state": "OH",
+    "primary_zip": "43068",
+    "primary_country": "US",
+    "primary_address": null,
+    "primary_location": [
+     -82.7824,
+     39.9621
+    ],
+    "addtnl_locations": [],
+    "description": "<div data-field=\"description\" class=\"jd-description\"><strong>Description</strong><p /><p class=\"MsoNormal\"><strong>Position Summary</strong></p><p class=\"MsoNormal\">The Cashier / Cook is responsible for preparing and serving quality food while providing outstanding customer service in a fast-paced café and food service environment. This role combines food preparation, cashiering, stocking, sanitation, and guest interaction to ensure a positive dining experience for customers. The ideal candidate enjoys working with people, has a passion for food service, and maintains high standards of cleanliness, food safety, and professionalism.<span style=\"mso-spacerun:yes;\"> </span></p></div><div data-field=\"salaryInfo\" class=\"jd-salaryInfo\"><strong>Minimum Salary:</strong> $15.90<br /><strong>Maximum Salary:</strong> $20.89</div><p /><div data-field=\"disclaimer\" class=\"jd-disclaimer\"><p>VS&Co provides a range of compensation for this role as shown. Your actual salary will be determined by a number of factors, including: your specific skills and experience, geographic region, or other relevant factors.</p></div><div data-field=\"qualifications\" class=\"jd-qualifications\"><strong>Qualifications</strong><p class=\"MsoNormal\"> </p><p class=\"MsoNormal\"><strong>Your Experience</strong></p><ul style=\"margin-top:0in;\" type=\"disc\"><li class=\"MsoNormal\" style=\"mso-list:l1 level1 lfo4;tab-stops:list .5in;\">Minimum of 1-2 years of food service, restaurant, café, or hospitality experience preferred.</li><li class=\"MsoNormal\" style=\"mso-list:l1 level1 lfo4;tab-stops:list .5in;\">Previous cooking and cashiering experience preferred.</li><li class=\"MsoNormal\" style=\"mso-list:l1 level1 lfo4;tab-stops:list .5in;\">Catering experience is a plus.</li></ul><p class=\"MsoNormal\"><strong>Knowledge, Skills & Abilities</strong></ul></div>",
+    "salary": "$20.89",
+    "job_type": "$15.90",
+    "travel": "$20.89",
+    "level": "Regular",
+    "relocation": null,
+    "education": null,
+    "years_experience": null,
+    "open_positions": null,
+    "brand": "Victoria's Secret",
+    "department": null,
+    "shift": null,
+    "recruiter": null,
+    "parent_category": "Cafe",
+    "sub_category": null,
+    "business_unit": null,
+    "is_internal": null,
+    "employment_type": "Full-time",
+    "schedule": null,
+    "compliment": "United States-Ohio-Reynoldsburg",
+    "store_id": "Distribution Cntr 4-Vss/Vsb",
+    "close_date": "2036-10-29T10:02:29",
+    "open_date": "2026-10-29T10:02:29",
+    "url": "https://careers.victoriassecret.com/en/job/24084964/cafe-cashier-reynoldsburg-oh/",
+    "seo_url": "https://vsco.taleo.net/careersection/1_VSS_PROF/jobapply.ftl?lang=en&job=04OGV&csNo=11002",
+    "location_type": "On-site",
+    "importance": 0.0,
+    "commute": null,
+    "freshness": 14109722,
+    "metadata": null,
+    "timestamp": "1793666695",
+    "easy_apply": [],
+    "internal_url": null,
+    "multi_select1": [],
+    "multi_select2": [],
+    "erp_eligible": null,
+    "erp_bonus": null,
+    "custom_fields": {}
+   }
+  }
+ ]
+}

@@ -93,7 +93,7 @@ platforms:
   greenhouse: true
   lever: true
   ashby: true
-  smartrecruiters: true
+  smartrecruiters: false   # api.smartrecruiters.com/robots.txt keeps programs out (this is forced off in the code too)
   workable: true
   recruitee: true
   bamboohr: true
@@ -149,6 +149,45 @@ gov_titles:
   - Information Technology Specialist
   - Computer Scientist
   - Computer Engineer
+
+# Extra search words for the retailers (Lowe's, Home Depot, CVS and the others under `retailers:` below, and any Workday site added with --retail),
+# part of the shared fetch. Retailers hire for stores, warehouses and head offices alike, so these cover the common jobs of each kind. Everyone's own
+# titles are searched there too, so a person who saves "Pharmacy Technician" or "Barista" gets those without this list. Level markers are ignored.
+retail_titles:
+  - Cashier
+  - Sales Associate
+  - Customer Service Associate
+  - Customer Service Representative
+  - Stocker
+  - Store Manager
+  - Assistant Store Manager
+  - Department Manager
+  - Shift Supervisor
+  - Team Lead
+  - Team Member
+  - Pharmacy Technician
+  - Pharmacist
+  - Warehouse Associate
+  - Forklift Operator
+  - Order Selector
+  - Delivery Driver
+  - Truck Driver
+  - Merchandiser
+  - Loss Prevention
+  - Fulfillment Associate
+  - Receiver
+  - Maintenance Technician
+  - Automotive Technician
+  - Cook
+  - Barista
+  - Buyer
+  - Merchandise Planner
+  - Financial Analyst
+  - Accountant
+  - Recruiter
+  - Marketing Specialist
+  - Supply Chain Analyst
+  - Store Planner
 
 # Government sources, on by default. Set enabled: false to turn one off.
 #  usajobs: the federal API. Needs a free key: add USAJOBS_API_KEY and USAJOBS_EMAIL (the email the key was issued to)
@@ -223,3 +262,117 @@ government:
     enabled: true
   tennessee:
     enabled: true
+
+# Retailer career sites, on by default. Set enabled: false to turn one off. Each is searched with the same title words as Workday (workday_search_terms) plus retail_titles above,
+# because a retailer lists thousands of store jobs next to a few tech roles; `search_terms:` here replaces those words and `pages:` is how many
+# result pages (ten jobs each) are read per word.
+#  lowes, cvs, tjx, dollartree, kohls, familydollar, fivebelow, gianteagle, oreilly, advanceauto, chewy, flooranddecor, academy, basspro (Cabela's too),
+#  michaels, wawa, circlek: each retailer's own career site, all on Phenom. Their robots.txt files allow the search and job pages. `pages:` is how many
+#  result pages (about ten jobs each) are read per search word; store jobs are plentiful, so a word like "cashier" has more than any page count reads.
+#  Oracle Recruiting Cloud sites (albertsons incl. Safeway, Vons and Jewel-Osco; kroger incl. Fred Meyer; dollargeneral, macys, bloomingdales, staples,
+#  sherwinwilliams, autozone, sallybeauty, americaneagle incl. Aerie; williamssonoma incl. Pottery Barn and West Elm; athome, warbyparker): `pages:` is
+#  result pages of 200, and a few are plenty because the best matches come first. Albertsons waits 10 seconds between requests, as its site asks.
+#  Jibe sites (sprouts, ulta, jcpenney, petsmart, costco, heb, footlocker, sheetz): each asks for 5 seconds between requests, so a run reads the first
+#  hundred matches of each search word within a request budget; tech and corporate jobs come out complete, a very common word like "cashier" only in part.
+#  SuccessFactors sites (tractorsupply, sephora, adidas, underarmour), and sites that list every job in a sitemap (gap incl. Old Navy, Banana Republic and
+#  Athleta; nike, napa, bathandbodyworks, urbn incl. Anthropologie and Free People; ross, lidl, freshmarket, wayfair, ikea, containerstore, seveneleven,
+#  loves, pilot, publix, walgreens): `pages:` does not apply. The sitemap sites keep the addresses holding a search word and read a job's page only when
+#  someone's search selects it.
+#  One-off sites: ahold (Food Lion, Giant Food, Stop & Shop, Hannaford), dillards, victoriassecret, hobbylobby, harborfreight.
+#  Retailers on Workday (Target, Nordstrom, Hy-Vee, BJ's, Meijer, Petco, Dick's, Signet and others) are added with deploy/add-retailer-boards.sh.
+#  TJX covers T.J. Maxx, Marshalls and HomeGoods, and lists jobs worldwide (the location settings drop the others).
+#  homedepot: careers.homedepot.com. Its job sitemap lists every posting with the title in the address, so the addresses holding one of the search
+#             words are picked and only those pages are read (`pages:` does not apply).
+retailers:
+  homedepot:
+    enabled: true
+  lowes:
+    enabled: true
+    pages: 20
+  cvs:
+    enabled: true
+    pages: 20
+  tjx:
+    enabled: true
+    pages: 20
+  dollartree:
+    enabled: true
+    pages: 20
+  kohls:
+    enabled: true
+    pages: 20
+  familydollar:
+    enabled: true
+    pages: 20
+  fivebelow:
+    enabled: true
+    pages: 20
+  gianteagle:
+    enabled: true
+    pages: 20
+  oreilly:
+    enabled: true
+    pages: 20
+  advanceauto:
+    enabled: true
+    pages: 20
+  chewy:
+    enabled: true
+    pages: 20
+  flooranddecor:
+    enabled: true
+    pages: 20
+  academy:
+    enabled: true
+    pages: 20
+  basspro:
+    enabled: true
+    pages: 20
+  michaels:
+    enabled: true
+    pages: 20
+  wawa:
+    enabled: true
+    pages: 20
+  circlek:
+    enabled: true
+    pages: 20
+  albertsons:
+    enabled: true
+    pages: 3
+  kroger:
+    enabled: true
+    pages: 3
+  dollargeneral:
+    enabled: true
+    pages: 3
+  macys:
+    enabled: true
+    pages: 3
+  bloomingdales:
+    enabled: true
+    pages: 3
+  staples:
+    enabled: true
+    pages: 3
+  sherwinwilliams:
+    enabled: true
+    pages: 3
+  autozone:
+    enabled: true
+    pages: 3
+  sallybeauty:
+    enabled: true
+    pages: 3
+  americaneagle:
+    enabled: true
+    pages: 3
+  williamssonoma:
+    enabled: true
+    pages: 3
+  athome:
+    enabled: true
+    pages: 3
+  warbyparker:
+    enabled: true
+    pages: 3

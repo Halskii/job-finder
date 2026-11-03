@@ -1,0 +1,215 @@
+{
+ "jobs": [
+  {
+   "data": {
+    "slug": "72105",
+    "language": "en-us",
+    "languages": [
+     "en-us"
+    ],
+    "req_id": "72105",
+    "title": "Senior Engineer, Customer Store Experience",
+    "description": "Overview Great brands reflect culture. The best ones help shape it. At Foot Locker, we’re rooted in sport, powered by style, and driven by the communities that move both. From Foot Locker and Kids Foot Locker to Champs Sports, WSS, and atmos, our brands sit at the intersection of sport, style, and self-expression. As part of the DICK’S Sporting Goods family, you’re backed by the resources, reach, and career opportunities of a world-class sports company. That unleashes Foot Locker to keep pushing forward with the agility and edge that define the brand. We’re looking for great people who want to influence culture and the generation that is shaping what’s next. Whether you’re building strategy, shaping innovations, or creating unforgettable customer moments, you’ll contribute to decisions and experiences that define our brands’ impact in the communities we serve. Come change the game with us. Apply today! This Role is 100% REMOTE At this time, Foot Locker will not sponsor a new applicant for employment authorization, or offer any immigration related support for this position (i.e. H1B, F-1 OPT, F-1 STEM OPT, F-1 CPT, J-1, TN, or another type of work authorization. We are seeking a Senior Engineer – Customer Store Experience with deep Oracle Xstore POS expertise to design, build, and support scalable customer-facing store technology solutions across our global retail footprint. This role focuses on Xstore POS enhancements, integrations, payments, loyalty, promotions, returns, and omnichannel experiences. Responsibilities Design, develop, and support Oracle Xstore POS and Back Office enhancements for loyalty, promotions, returns, exchanges, receipts, omnichannel transactions, and payment-related experiences. Analyze business requirements, assess impacts to Xstore transaction [...] sent transaction flows, EMV, tokenization, offline processing, and eWallet tenders. Experience with payment gateway integrations and mobile payment solutions. Benefits The annual base salary range is $105,000 - $125,000 / year. This range represents the anticipated low and high end of the salary for this position. Salary will be determined by the education, experience, knowledge, skills, and abilities of the applicant, internal equity, and alignment with market data. Salary is one component of the Foot Locker, Inc. total compensation package, which includes the below. Foot Locker Benefits: Emp",
+    "location_name": "Remote Location",
+    "street_address": "Remote",
+    "country": "United States",
+    "country_code": "US",
+    "location_type": "LAT_LNG",
+    "latitude": 43.0059455,
+    "longitude": -123.8925908,
+    "categories": [
+     {
+      "name": "Technology"
+     }
+    ],
+    "tags1": [
+     "9/25/2026"
+    ],
+    "tags2": [
+     "Regular Full-Time"
+    ],
+    "tags3": [
+     "Exempt"
+    ],
+    "tags4": [
+     "Foot Locker"
+    ],
+    "tags5": [
+     "Remote"
+    ],
+    "tags8": [
+     "Remote Location"
+    ],
+    "tags9": [
+     "North America"
+    ],
+    "promotion_value": 0,
+    "employment_type": "FULL_TIME",
+    "qualifications": "At Foot Locker, we value innovation, authenticity, and integrity in all that we do. To uphold the security and fairness of our hiring process, we ask that candidates refrain from using AI tools, including ChatGPT, during interviews and assessments. To ensure a smooth and secure experience, please review the following guidelines: Cameras must be on for all virtual interviews. AI tools are strictly prohibited during interviews or assessments. We appreciate your understanding and cooperation as we work together to create a transparent and equitable hiring experience. 5+ years of software engineering experience with Oracle Xstore POS development, customization, and Java-based extensions. Experience delivering customer-facing retail POS, Back Office, and payment solutions. Experience with Xstore integrations for order management, loyalty, promotions, and payments. Strong understanding of store operations, customer journeys, checkout workflows, and global deployment considerations. Excellent communication, collaboration, and documentation skills across Product, QA, Operations, Architecture, Security, Networking, and vendor teams. Strong proficiency with RESTful services, message queues, XML/JSON payloads, and integration patterns. Experience with Git/GitHub for source control, branching, pull requests, code reviews, release management, and collaborative development. Strong SQL and database skills with Oracle Database, SQL Server, PostgreSQL, or similar relational platforms. Experience with Linux and Windows environments, scripting, automation, and deployment troubleshooting. Familiarity with Docker, Kubernetes, and cloud-native application platforms. Experience with Azure cloud services, API management, monitoring tools, and enterprise integration patterns. Experience with Azure DevOps, GitHub Actions, Jenkins, or similar CI/CD platforms for build, test, deployment, and release automation. Proficiency with Visual Studio Code, Visual Studio, IntelliJ IDEA, Eclipse, or similar development environments. Experience with Microsoft .NET (C#) services, APIs, or integrations that interact with Oracle Xstore and retail platforms.   Preferred Requirements:  Knowledge of payment fundamentals, including card-present transaction flows, EMV, tokenization, offline processing, and eWallet tenders. Experience with payment gateway integrations and mobile payment solutions.",
+    "hiring_organization": "Foot Locker",
+    "responsibilities": "Design, develop, and support Oracle Xstore POS and Back Office enhancements for loyalty, promotions, returns, exchanges, receipts, omnichannel transactions, and payment-related experiences. Analyze business requirements, assess impacts to Xstore transaction flows, and deliver technical designs, estimates, and Java-based solutions using Xstore frameworks, extension points, data models, and configuration. Build and support integrations between Xstore and enterprise services, including customer data, loyalty, order management, promotions, and payments, using RESTful APIs, messaging, XML/JSON payloads, and integration patterns. Partner with Product and QA to refine requirements, define acceptance criteria, review test scenarios, resolve defects, and validate readiness for store deployment.  Investigate production issues using logs, transaction data, service responses, and monitoring tools; support incident response, root cause analysis, corrective actions, and operational documentation. Provide technical guidance, participate in design and code reviews, and promote consistent development and documentation standards across the POD.",
+    "posted_date": "2026-09-25T16:28:00+0000",
+    "apply_url": "https://us-corp-footlocker.icims.com/jobs/72105/login",
+    "internal": false,
+    "external": false,
+    "searchable": true,
+    "applyable": true,
+    "li_easy_applyable": true,
+    "ats_code": "icims",
+    "isFrontLineAIJob": false,
+    "isApplyFlowJob": false,
+    "update_date": "2026-10-06T07:52:15+0000",
+    "create_date": "2026-09-25T16:28:32+0000",
+    "category": [
+     " Technology"
+    ],
+    "full_location": "United States",
+    "short_location": "United States",
+    "multipleLocations": false
+   }
+  },
+  {
+   "data": {
+    "slug": "72659",
+    "language": "nl-be",
+    "languages": [
+     "nl-be"
+    ],
+    "req_id": "72659",
+    "title": "Store Manager - Foot Locker Groningen",
+    "description": "Overzicht Je bent een geboren leraar en coach en je hebt een passie voor het helpen van anderen om klanten een geweldige winkelervaring te bezorgen. Je team reageert wanneer je het leidt en ze willen hard voor je werken. Je legt verantwoording af aan de District Manager en je bent verantwoordelijk voor het leiden, coachen en ontwikkelen van alle teamleden om klanten een geweldige winkelervaring te bezorgen en om alle bedrijfsstrategieën uit te voeren. Je verantwoordelijkheden omvatten alle aspecten van het winkelmanagement, waaronder: uitvoering van de bedrijfsnormen met betrekking tot werving en selectie, indienstneming, training, klantenservice, Visual Merchandising en winkelverrichtingen. Het zijn al deze activiteiten samen die de verkoop stimuleren om de winstdoelen te maximaliseren voor jouw winkel en om jou en je team naar succes te leiden. Kwalificaties Aantoonbare leidinggevende ervaring met minimaal 2 jaar ervaring in een klantgerichte verkoopomgeving Je hebt zelfvertrouwen en je voelt je comfortabel bij het benaderen van klanten om ze een geweldige ervaring te bezorgen Je bent gemotiveerd om geweldige resultaten te behalen door je enthousiasme voor de interactie met klanten, sneakers en gerelateerde producten Je bent vindingrijk en veelzijdig in situaties van veranderende vereisten en kansen in een snel veranderende omni-channel retail omgeving Je bent in staat om snel te schakelen en beschikt over sterke cognitieve en wiskundige vaardigheden, waaronder probleemanalyse, besluitvorming en financiële analyse Je hecht veel waarde aan ethiek, normen en waarden, integriteit en vertrouwen Flexibele beschikbaarheid - waaronder avonden, weekenden en en sommige feestdagen Verantwoordelijkheden Het coachen en motiveren van je team om topprestaties te behalen en een uitmuntende klantenervaring te verlenen Het uitvoeren van bedrijfsnormen met betrekking tot werving en selectie, indienstneming, training, klantenservice, Visual Merchandising en winkelverrichtingen Het uitvoeren van plannen om de belangrijkste prestatie indicatoren te stimuleren en zo de winstgevendheid te maximaliseren Het vergroten van klantenbinding door het team in staat te stellen de klanten een natuurlijke en persoonlijke ervaring te bezorgen Schakel tussen klanten, verkoopmedewerkers, het management van de winkel en corporate business partners Behoudt een hoog niveau van klantgerichtheid en leidt via zijn/haar voorbeeld, met duidelijke en betrokken communicatie Zorgt ervoor dat visuele richtlijnen en normen opgevolgd worden Passie voor het overdragen van productkennis aan medewerkers ze te leren hoe ze hun kennis toe kunnen passen in de klantenervaring",
+    "location_name": "Groningen NE",
+    "street_address": "Herestraat 39",
+    "city": "Groningen",
+    "country": "Netherlands",
+    "country_code": "NL",
+    "postal_code": "9711-LB",
+    "location_type": "LAT_LNG",
+    "latitude": 53.21701780000001,
+    "longitude": 6.5671674,
+    "categories": [
+     {
+      "name": "Store Retail"
+     }
+    ],
+    "tags1": [
+     "10/23/2026"
+    ],
+    "tags2": [
+     "Regular Full-Time"
+    ],
+    "tags4": [
+     "Foot Locker"
+    ],
+    "tags5": [
+     "Herestraat 39"
+    ],
+    "tags6": [
+     "01108"
+    ],
+    "tags8": [
+     "Foot Locker Nl 1108"
+    ],
+    "tags9": [
+     "Europe"
+    ],
+    "promotion_value": 0,
+    "employment_type": "FULL_TIME",
+    "qualifications": "Aantoonbare leidinggevende ervaring met minimaal 2 jaar ervaring in een klantgerichte verkoopomgeving Je hebt zelfvertrouwen en je voelt je comfortabel bij het benaderen van klanten om ze een geweldige ervaring te bezorgen Je bent gemotiveerd om geweldige resultaten te behalen door je enthousiasme voor de interactie met klanten, sneakers en gerelateerde producten Je bent vindingrijk en veelzijdig in situaties van veranderende vereisten en kansen in een snel veranderende omni-channel retail omgeving Je bent in staat om snel te schakelen en beschikt over sterke cognitieve en wiskundige vaardigheden, waaronder probleemanalyse, besluitvorming en financiële analyse Je hecht veel waarde aan ethiek, normen en waarden, integriteit en vertrouwen Flexibele beschikbaarheid - waaronder avonden, weekenden en en sommige feestdagen",
+    "hiring_organization": "Foot Locker",
+    "responsibilities": "Het coachen en motiveren van je team om topprestaties te behalen en een uitmuntende klantenervaring te verlenen Het uitvoeren van bedrijfsnormen met betrekking tot werving en selectie, indienstneming, training, klantenservice, Visual Merchandising en winkelverrichtingen Het uitvoeren van plannen om de belangrijkste prestatie indicatoren te stimuleren en zo de winstgevendheid te maximaliseren Het vergroten van klantenbinding door het team in staat te stellen de klanten een natuurlijke en persoonlijke ervaring te bezorgen Schakel tussen klanten, verkoopmedewerkers, het management van de winkel en corporate business partners Behoudt een hoog niveau van klantgerichtheid en leidt via zijn/haar voorbeeld, met duidelijke en betrokken communicatie Zorgt ervoor dat visuele richtlijnen en normen opgevolgd worden Passie voor het overdragen van productkennis aan medewerkers ze te leren hoe ze hun kennis toe kunnen passen in de klantenervaring",
+    "posted_date": "2026-10-23T10:45:00+0000",
+    "apply_url": "https://nldu-retail-footlocker.icims.com/jobs/72659/login",
+    "internal": false,
+    "external": false,
+    "searchable": true,
+    "applyable": true,
+    "li_easy_applyable": true,
+    "ats_code": "icims",
+    "isFrontLineAIJob": false,
+    "isApplyFlowJob": false,
+    "update_date": "2026-10-23T20:11:09+0000",
+    "create_date": "2026-10-23T10:46:04+0000",
+    "category": [
+     " Store Retail"
+    ],
+    "full_location": "Groningen, Netherlands",
+    "short_location": "Groningen, Netherlands",
+    "multipleLocations": false
+   }
+  },
+  {
+   "data": {
+    "slug": "72714",
+    "language": "en-us",
+    "languages": [
+     "en-us"
+    ],
+    "req_id": "72714",
+    "title": "Store Manager",
+    "description": "Overview Great brands reflect culture. The best ones help shape it. At Foot Locker, we’re rooted in sport, powered by style, and driven by the communities that move both. From Foot Locker and Kids Foot Locker to Champs Sports, WSS, and atmos, our brands sit at the intersection of sport, style, and self-expression. As part of the DICK’S Sporting Goods family, you’re backed by the resources, reach, and career opportunities of a world-class sports company. That unleashes Foot Locker to keep pushing forward with the agility and edge that define the brand. We’re looking for great people who want to influence culture and the generation that is shaping what’s next. Whether you’re building strategy, shaping innovations, or creating unforgettable customer moments, you’ll contribute to decisions and experiences that define our brands’ impact in the communities we serve. Come change the game with us. Apply today! Overview The Assistant Store Manager (ASM) is a key store leader who helps bring sneaker culture to life by leading with energy, ownership, and purpose. This role supports the Store Manager in driving sales results, coaching the team, and keeping the store running strong; day in and day out. Assistant Store Managers are hands on leaders who move with urgency, stay connected to customers and teammates, and take pride in their store. With an “Always on, Never no” mindset, ASMs help set the tone on the floor while taking ownership of what they can control to deliver a great customer experience. Responsibilities What You’ll Do Customer Experience & Sales • Lead by example on the sales floor with an “Always on, Never no” mindset; bringing energy, confidence, and solutions to every customer interaction. • Coach the team to deliver great service, share product knowledge, and kee [...] bited during interviews or assessments. We appreciate your understanding and cooperation as we work together to create a transparent and equitable hiring experience. Benefits Salary Range: $ 66,000 - $70,000 / year Total rewards may include: o Bonus Incentive o Employee Discount o Flexible Pay Options o Career Development & Advancement Opportunities o Paid Time Off o Medical, Dental & Vision Insurance o 401(k) & Roth 401(k) o Life Insurance o Flexible Spending Accounts",
+    "location_name": "Edison NJ",
+    "street_address": "55 Parsonage Road",
+    "city": "Edison",
+    "state": "New Jersey",
+    "country": "United States",
+    "country_code": "US",
+    "postal_code": "08837",
+    "location_type": "LAT_LNG",
+    "latitude": 40.5473831,
+    "longitude": -74.3356524,
+    "categories": [
+     {
+      "name": "Store Retail"
+     }
+    ],
+    "tags1": [
+     "10/26/2026"
+    ],
+    "tags2": [
+     "Regular Full-Time"
+    ],
+    "tags4": [
+     "Foot Locker"
+    ],
+    "tags5": [
+     "55 Parsonage Road"
+    ],
+    "tags6": [
+     "08448"
+    ],
+    "tags8": [
+     "Menlo Park Mall"
+    ],
+    "tags9": [
+     "North America"
+    ],
+    "promotion_value": 0,
+    "employment_type": "FULL_TIME",
+    "qualifications": "Required • 1+ years of retail experience, preferably in a leadership or key holding role. • Ability to coach, motivate, and engage a diverse team. • Strong communication and teamwork skills. • Ability to work flexible hours including evenings, weekends, and holidays. • Reliable, self motivated, and ready to take ownership. • Basic understanding of retail KPIs and operational processes. Preferred • Previous experience as a Key Holder, Supervisor, or Assistant Manager. • Experience in a fast paced or high volume retail environment. • Interest in pursuing long term career growth in retail leadership. What Success Looks Like • Engagement: You bring hustle to every shift, moving with purpose and staying attentive to customers, teammates, and store needs. • Sales: You help drive store sales and conversion through strong floor leadership. • Customer Experience: You live the “Always on, Never no” mindset with a positive, can do attitude. • Execution: Take an owner/operator approach. You hold standards high and get things done. • Team: We win as one! You show up as a supportive, accountable teammate who lifts others up. Ready to level up, lead the floor, and take ownership of your store experience? Apply today. At Foot Locker, we value innovation, authenticity, and integrity in all that we do. To uphold the security and fairness of our hiring process, we ask that candidates refrain from using AI tools, including ChatGPT, during interviews and assessments. To ensure a smooth and secure experience, please review the following guidelines: • Cameras must be on for all virtual interviews. • AI tools are strictly prohibited during interviews or assessments. We appreciate your understanding and cooperation as we work together to create a transparent and equitable hiring experience.",
+    "hiring_organization": "Foot Locker",
+    "responsibilities": "What You’ll Do Customer Experience & Sales • Lead by example on the sales floor with an “Always on, Never no” mindset; bringing energy, confidence, and solutions to every customer interaction. • Coach the team to deliver great service, share product knowledge, and keep customers excited to shop. • Support sales goals by staying engaged on the floor and helping the team close the loop with customers. Store Ops & Execution • Help manage daily store operations including opening/closing, cash handling, and floor coverage. • Move with purpose by keeping the store organized, customer ready, and running smoothly. • Follow all safety, loss prevention, and standard operating procedures to protect customers, teammates, and product. • Take an owner/operator mindset by addressing issues, maintaining standards, and taking ownership of store execution. • Leverage retail technology and digital tools to enhance the customer experience, enable associates on the sales floor, and support efficient store operations. Teamwork & Leadership • Serve as Manager on Duty when scheduled, providing confident leadership and clear direction. • Support hiring, onboarding, and training of store associates. • Coach teammates in real time, recognizing wins and helping close performance gaps. • Jump in wherever needed to support the team and store priorities.",
+    "posted_date": "2026-10-26T23:27:00+0000",
+    "apply_url": "https://us-retail-footlocker.icims.com/jobs/72714/login",
+    "internal": false,
+    "external": false,
+    "searchable": true,
+    "applyable": true,
+    "li_easy_applyable": true,
+    "ats_code": "icims",
+    "isFrontLineAIJob": false,
+    "isApplyFlowJob": false,
+    "update_date": "2026-10-27T08:20:11+0000",
+    "create_date": "2026-10-26T23:27:56+0000",
+    "category": [
+     " Store Retail"
+    ],
+    "full_location": "Edison, New Jersey",
+    "short_location": "Edison, New Jersey",
+    "multipleLocations": false
+   }
+  }
+ ],
+ "totalCount": 3,
+ "count": 3
+}

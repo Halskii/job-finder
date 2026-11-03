@@ -1,0 +1,49 @@
+{
+ "tool": "get_job",
+ "result": {
+  "requisitionId": "560976_external_USA-VA-Quinton",
+  "client": "Food Lion",
+  "title": "PT Pharmacy Technician Certified",
+  "description": "<b>Category/Area of Expertise:</b> Retail Operations<br><b>Job Requisition:</b> 560976<br> <b>Address: </b>USA-VA-Quinton-7300 Market Place Drive <br><b>Store Code: </b>Store 02219 PHARMACY (7231282) <br><br>Food Lion has been providing an easy, fresh and affordable shopping experience to the communities we serve since 1957. Today, our 82,000 associates serve more than 10 million customers a week across 10 Southeastern and Mid-Atlantic states.<br><br><b>PRIMARY PURPOSE</b><br><br>The employee performs the functions of this position in clean, well-lighted temperature controlled, and well ventilated environment. Position requires contact with controlled substances as well as other pharmaceutical products. <br><br><b>DUTIES AND RESPONSIBILITIES</b><br><br>&bull; Support and work with pharmacist to achieve outstanding pharmaceutical care.<br>&bull; Assist pharmacist, under their direct supervision, with filling of prescriptions.<br>&bull; Greet and provide customers with prompt and courteous service and assistance.<br>&bull; Operate pharmacy systems including register, computer software, and telephone.<br>&bull; Assist in maintenance of third party prescription information and resolution of rejected adjudication.<br>&bull; Maintain insurance/counseling log.<br>&bull; Maximize sales through excellent customer service.<br>&bull; Follow all company policies, procedures and practices.<br>&bull; Order, stock, maintain and return pharmacy inventory through proper supplier.<br>&bull; Maintain pharmacy department supplies (e.g. bottles, bags, labels, staples, etc.).<br>&bull; Receive and obtain information needed on written prescriptions or telephone refill requests from customers.<br>&bull; Maintain organized filing system for invoices, manual insurance claims, daily reports, etc.<br>&bull; Relay specific communications to customers from technician or pharmacist processing prescription.<br>&bull; Support company safety standards. Communicate any needed equipment repairs or maintenance work needed.<br>&bull; Works with Pharmacy Manager, Store Manager and pharmacy personnel to execute marketing plans and programs.<br>&bull; Assist in processing pharmacy outdates and credits including keeping inventory free from outdated product.<br>&bull; Performs other duties as assigned by Pharmacy Manager or Store Manager.<br>&bull; Adhere to all company guidelines, policies and standard practices. <br>&bull; This description is intended to outline the primary responsibilities, general nature and level of work being performed by associate assigned to this position. <br>&bull;It is not intended to be an exhaustive list of all responsibilities, duties and competencies.<br><br><b>QUALIFICATIONS</b><br><br>Requirements:<br>&bull; Hold Pharmacy Technician Certification from an authorized accrediting organization.<br>&bull; Demonstrated competence in effective communications skills and customer relations. <br>&bull; Unrestricted ability to handle and process Medicaid and Medicare prescriptions. <br>&bull; Ability and desire to communicate effectively with customers, associates, other health professionals. <br>&bull; Willingness to work a flexible schedule consistent with a stimulating retail environment. <br>&bull; Ability to work accurately and efficiently. Able to read, write and perform basic math functions. <br>&bull; Maintain confidentiality of customer and company information. <br>&bull; Understand pharmacy inventory control procedures, including special requirements for controlled substances. <br>&bull; Understand Pharmacy Standard Practice Manual. <br>&bull; Share responsibility for department maintenance and cleanliness. <br>&bull; This list is not all inclusive. <br>&bull; Other requirements may be added to meet business demands<br><br><b>PHYSICAL REQUIREMENTS</b><br><br>Some minor lifting (less than 25 lbs.) is required. The employee will be required to stand for extended periods of time during working hours.<br><br><b>PREFERRED REQUIREMENTS</b><br><br>Prior retail pharmacy experience.<br><br>Food Lion provides equal employment opportunities to all associates and applicants for employment without regard to race, color, religion, sex (including pregnancy, childbirth and related conditions) national origin, age, disability, sexual orientation, veteran status, gender identity or gender expression or any other characteristic protected by law.",
+  "department": "Retail Operations",
+  "departmentId": "655636d49006700031423bc2",
+  "employmentType": [
+   {
+    "value": "Part Time"
+   }
+  ],
+  "datePosted": "2026-10-26T00:00:00.000Z",
+  "applyUrl": "https://aholddelhaizeapply.appvault.com/external/home?jobId=560976&company=Food Lion, LLC",
+  "attributes": [
+   ""
+  ],
+  "recruiterAssigned": null,
+  "address": [
+   {
+    "city": "Quinton",
+    "state": "VA",
+    "country": "USA",
+    "zipCode": "",
+    "address1": "7300 Market Place Drive",
+    "location": {
+     "type": "Point",
+     "coordinates": [
+      "",
+      ""
+     ]
+    }
+   }
+  ],
+  "city": "Quinton",
+  "state": "VA",
+  "zipCode": "",
+  "country": "USA",
+  "salaryMin": 16.6,
+  "salaryMax": 24.9,
+  "salRateType": "Hourly (HOURLY)",
+  "brandId": 1037387,
+  "createdAt": "2026-10-26T00:00:00.000Z",
+  "updatedAt": "2026-10-26T17:55:31.281Z"
+ },
+ "summary": "Job details for PT Pharmacy Technician Certified"
+}

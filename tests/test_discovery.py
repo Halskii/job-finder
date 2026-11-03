@@ -128,6 +128,27 @@ class MatchingTests(unittest.TestCase):
         self.assertEqual([j.id for j in discovery.matching(jobs, cfg)], ["1"])
 
 
+class SmartRecruitersOff(unittest.TestCase):
+    """api.smartrecruiters.com/robots.txt disallows programs, so nothing may ask that host."""
+
+    def test_the_list_and_the_posting_reader_refuse_without_a_request(self):
+        with mock.patch.object(sources, "_get", side_effect=AssertionError("asked the host")), mock.patch.object(sources, "_session", side_effect=AssertionError("asked the host")):
+            with self.assertRaises(PermissionError):
+                sources.fetch_smartrecruiters("AcmeCo")
+            with self.assertRaises(PermissionError):
+                sources.fill_detail(job("sr:a:1", "smartrecruiters", "Acme", "Software Engineer", detail={"api": "https://api/x"}))
+
+    def test_it_is_left_out_of_the_platforms_the_crawl_and_discover(self):
+        import crawl
+        self.assertFalse(main.platform_enabled({}, "smartrecruiters"))
+        self.assertFalse(main.platform_enabled({"platforms": {"smartrecruiters": True}}, "smartrecruiters"))     # whatever the config says
+        self.assertTrue(main.platform_enabled({}, "lever"))
+        self.assertNotIn("smartrecruiters", crawl.PATTERNS)
+        self.assertNotIn("smartrecruiters", [name for name, _ in discovery.SYSTEMS])      # not asked when boards are looked up by name
+        self.assertIn("smartrecruiters", discovery.LIST_KEYS)                              # but boards already stored stay stored
+
+
+@mock.patch.object(sources, "SMARTRECRUITERS_ALLOWED", True)      # the reading code is kept; these tests run it as if the site allowed programs
 class SmartRecruitersTests(unittest.TestCase):
     def test_list_paginates_asks_for_us_and_marks_remote(self):
         pages = {0: {"totalFound": 150, "content": [
@@ -313,6 +334,13 @@ class CommandTests(unittest.TestCase):
             main.cmd_workday_add(argparse.Namespace(url=url, name="State of Georgia", gov=True), self.cfg, {}, self.conn)
         self.assertEqual(boards.load(self.conn)["workday"],
                          [{"name": "State of Georgia", "host": "georgia.wd5.myworkdayjobs.com", "tenant": "georgia", "site": "TGC", "gov": True}])
+
+    def test_workday_add_can_mark_a_retailer(self):
+        url = "https://target.wd5.myworkdayjobs.com/targetcareers"
+        with mock.patch.object(discovery, "check_workday", return_value=118):
+            main.cmd_workday_add(argparse.Namespace(url=url, name="Target", retail=True), self.cfg, {}, self.conn)
+        self.assertEqual(boards.load(self.conn)["workday"],
+                         [{"name": "Target", "host": "target.wd5.myworkdayjobs.com", "tenant": "target", "site": "targetcareers", "retail": True}])
 
     def test_workday_add_rejects_a_bad_address(self):
         with mock.patch.object(discovery, "check_workday") as chk:

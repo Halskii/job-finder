@@ -1,0 +1,35 @@
+{
+ "data": [
+  {
+   "expireOn": "2026-11-13T06:00:00Z",
+   "locationInfo": {
+    "zipCode": "85233",
+    "address": "395 NORTH WILLIAM DILLARD DR.",
+    "city": "Gilbert",
+    "locationId": "51706ccce4b03bc5447fb11e",
+    "state": "AZ"
+   },
+   "updatedBy": "GRAYLB",
+   "groupingId": 2443,
+   "approvedBy": "GRAYLB",
+   "description": "Work in a fast paced buying office environment for a major fashion retail department store.  As a footwear assistant buyer, you will monitor sales, inventory levels, trends, profitability and work closely with the buying staff and management for women's footwear.  This is a corporate position with the responsibility for all Dillard's stores nationwide.   This is a full-time, on-site position located at our Gilbert, Arizona office. A high level of attendance is required as an essential function of this position.",
+   "updatedOn": "2026-10-26T16:51:36Z",
+   "approvalNeededBy": "GRAYLB",
+   "title": "Assistant Buyer - Corporate Footwear",
+   "postOn": "2026-09-13T05:00:00Z",
+   "approvedOn": "2026-09-15T13:14:31Z",
+   "requestedBy": "GRAYLB",
+   "responsibilities": "Work in tandem with buyer and management to manage brand performance in order to achieve all financial goals.\r\nIdentify regional buying opportunities and work with buyer to implement effective action.\r\nTravel throughout regions for store visits to build awareness of market nuances.\r\nDaily/Weekly functions include working with buyer to monitor sales, track orders, review inventory levels, forecast reorders and markdowns.",
+   "workArea": "Merchandising",
+   "locationId": "51706ccce4b03bc5447fb11e",
+   "requestedOn": "2026-09-15T13:14:05Z",
+   "minYearsExperience": 1,
+   "requiredSkills": "Have a minimum of 1 year direct-related retail buying experience.\r\nHave a minimum of 4 year Bachelor's Degree.\r\nStrong proficiency in MS Excel and Power Point.\r\nExcellent organizational and problem solving skills.\r\nExcellent verbal and written communication skills and work well in a team environment.\r\nIndividual must have a passion for retail, a high energy level, and ability to be flexible.\r\nHave strong analytical and math skills.",
+   "id": "6aa9449d60a33724fa21d8c1",
+   "categories": [
+    "isMerchandising"
+   ]
+  }
+ ],
+ "locations": []
+}

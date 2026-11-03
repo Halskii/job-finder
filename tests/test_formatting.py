@@ -145,6 +145,7 @@ class RestoreTests(unittest.TestCase):
         f.assert_called_once_with(["DevOps engineer"], pages=3)
         self.assertEqual(res["description"], "### KEY RESPONSIBILITIES\n\n- Design pipelines")
 
+    @mock.patch.object(sources, "SMARTRECRUITERS_ALLOWED", True)      # the reading code is kept; this runs it as if the site allowed programs
     def test_a_smartrecruiters_posting_is_asked_for_by_its_own_address(self):
         db.add_job(self.conn, sources.Job("sr:acme:744", "smartrecruiters", "Acme", "Engineer", "Austin", "https://jobs.smartrecruiters.com/acme/744",
                                           description="Plain text"), 1.0)

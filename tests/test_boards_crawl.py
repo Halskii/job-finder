@@ -87,7 +87,8 @@ class BoardStoreTests(Base):
                 raise http_error(404)
             return [sources.Job("gh:alive:1", "greenhouse", "Alive", "Software Engineer", "Austin, TX", "https://x", description="d")]
         with mock.patch.object(discovery.sources, "fetch_greenhouse", fetch), mock.patch.object(main, "collect_feeds", return_value=[]), \
-                mock.patch.object(main, "collect_government", return_value=[]), mock.patch.object(main.time, "sleep"):
+                mock.patch.object(main, "collect_government", return_value=[]), mock.patch.object(main, "collect_retail", return_value=[]), \
+                mock.patch.object(main.time, "sleep"):
             for _ in range(3):
                 stats = ingest.run_fetch({**cfg, "request_delay": 0, "sources": boards.load(self.admin)}, queue_users=False)
         self.assertEqual(stats["boards_removed"], 1)
