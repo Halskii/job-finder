@@ -73,6 +73,26 @@ class ScorerTests(unittest.TestCase):
         self.assertEqual(res["verdict"], "maybe")        # invalid verdict repaired from score
         self.assertEqual(res["missing_required"], ["Go"])
 
+    def test_the_claude_5_models_get_room_to_think_and_a_low_effort(self):
+        for model in ("claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5", "claude-fable-5-1"):
+            self.assertEqual(scorer.request_options(model), {"max_tokens": 4096, "output_config": {"effort": "low"}}, model)
+        for model in ("claude-haiku-4-5-20251001", "claude-sonnet-4-6", "model", "m"):      # they do not think, so nothing changes for them
+            self.assertEqual(scorer.request_options(model), {"max_tokens": 900}, model)
+
+    def test_the_request_carries_them(self):
+        sent = []
+        client = type("Client", (), {"messages": type("Messages", (), {"create": staticmethod(lambda **kw: sent.append(kw) or FakeClient.messages.create())})})
+        job = {"description": "d", "pay_min": None, "pay_max": None, "company": "c", "title": "t", "location": "l", "posted": None}
+        scorer.score_job(client, "claude-haiku-5-5", {}, job, 0)
+        scorer.score_job(client, "claude-haiku-4-5-20251001", {}, job, 0)
+        self.assertEqual((sent[0]["max_tokens"], sent[0]["output_config"]), (4096, {"effort": "low"}))
+        self.assertEqual(sent[1]["max_tokens"], 900)
+        self.assertNotIn("output_config", sent[1])        # Haiku 4.5 rejects an effort setting
+
+    def test_the_default_scoring_model_is_haiku_5_5(self):
+        import pipeline
+        self.assertEqual(pipeline.DEFAULTS["model"], "claude-haiku-5-5")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -53,6 +53,44 @@ class PromptRuleTests(unittest.TestCase):
         self.assertIn("Do not sound especially passionate", tailor.LETTER_SYSTEM)
         self.assertIn("Only do this if the candidate's own request asks for it", tailor.LETTER_SYSTEM)
 
+    def test_the_letter_follows_the_cornell_guide_by_default(self):
+        """https://jobs.hr.cornell.edu/us/en/blogarticle/how-to-write-an-effective-cover-letter: 3 or 4 paragraphs on one page; an opening that names
+        the job and employer; a body of tailored examples with their impact; why this employer; a closing that asks about next steps and thanks."""
+        letter = tailor.LETTER_SYSTEM
+        self.assertIn(tailor.LETTER_GUIDE, letter)
+        self.assertIn("3 or 4 short paragraphs on one page", letter)
+        self.assertNotIn("3 to 5", letter)                                                  # the old length
+        self.assertIn("under 330 words in total", letter)
+        self.assertIn("the opening at most 70 words, each body paragraph at most 90, the closing at most 50", letter)    # a total alone was ignored: 357 words
+        self.assertIn("name the exact job title and the company", letter)                  # opening
+        self.assertIn("Do not say how the candidate found the opening unless their own request says so", letter)    # never invent a fact
+        self.assertIn("do not repeat the resume", letter)                                    # body
+        self.assertIn("Say what the candidate delivered or changed", letter)
+        self.assertIn("use only results the resume states", letter)                          # impact, but no invented numbers
+        self.assertIn("Never write a bare claim", letter)
+        self.assertIn("Do not invent anything about the employer", letter)                  # why this employer: only what the posting says
+        self.assertIn("next steps and thank the reader", letter)                             # closing
+        self.assertIn("Do not repeat contact details", letter)                               # the letterhead has them
+
+    def test_the_guide_is_for_the_letter_only_and_the_old_rules_stay(self):
+        self.assertNotIn("Opening paragraph", tailor.RESUME_SYSTEM)
+        self.assertIn("Do not sound especially passionate", tailor.LETTER_SYSTEM)           # warmth about the whole role, not one requirement
+        self.assertIn("Never write about what the candidate lacks", tailor.LETTER_SYSTEM)
+        self.assertIn("Do not write a date, address, greeting, or sign-off", tailor.LETTER_SYSTEM)
+        self.assertEqual(tailor.LETTER_SYSTEM.count("Opening paragraph"), 1)
+
+    def test_the_candidates_own_request_still_overrides_the_guide(self):
+        """It is a default: ask() tells the model the request overrides the style rules, so 'make it two paragraphs' wins over '3 or 4'."""
+        sent = []
+        client = SimpleNamespace(messages=SimpleNamespace(create=lambda **kw: sent.append(kw) or SimpleNamespace(
+            stop_reason="end_turn", content=[SimpleNamespace(type="text", text='{"company_name": "Acme", "cover_letter": {"paragraphs": ["x"]}}')],
+            usage=None)))
+        row = {"company": "Acme", "title": "Engineer", "location": "Austin", "description": "d"}
+        tailor.ask(client, "m", tailor.LETTER_SYSTEM, {}, "resume", row, "COVER LETTER", "Keep it to two paragraphs.")
+        self.assertIn("it overrides the style rules above, but never the rules about facts", sent[0]["messages"][0]["content"])
+        self.assertIn("Keep it to two paragraphs.", sent[0]["messages"][0]["content"])
+        self.assertIn("3 or 4 short paragraphs", sent[0]["system"])
+
     def test_neither_document_lists_what_the_candidate_lacks(self):
         """A letter that said 'I have not built RAG systems or worked in financial services' made a strong candidate look
         merely okay. The employer has the resume; the letter sells and does not confess."""

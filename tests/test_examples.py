@@ -49,8 +49,8 @@ class ExampleProfileTests(unittest.TestCase):
 
 
 class MissingFileTests(unittest.TestCase):
-    def run_main(self, root: Path):
-        with mock.patch.object(main, "ROOT", root), mock.patch.object(sys, "argv", ["main.py", "list"]):
+    def run_main(self, root: Path, command=("list",)):
+        with mock.patch.object(main, "ROOT", root), mock.patch.object(sys, "argv", ["main.py", *command]):
             with self.assertRaises(SystemExit) as ctx:
                 main.main()
         return str(ctx.exception)
@@ -59,10 +59,26 @@ class MissingFileTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             self.assertIn("config.example.yaml", self.run_main(Path(tmp)))
 
-    def test_missing_profile_points_to_the_example(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            shutil.copy(ROOT / "config.example.yaml", Path(tmp) / "config.yaml")
-            self.assertIn("profile.example.json", self.run_main(Path(tmp)))
+    def test_missing_profile_points_to_the_example_for_the_commands_that_read_it(self):
+        self.assertEqual(main.NEEDS_PROFILE, ("run", "profile"))
+        for command in ("run", "profile"):
+            with tempfile.TemporaryDirectory() as tmp:
+                shutil.copy(ROOT / "config.example.yaml", Path(tmp) / "config.yaml")
+                self.assertIn("profile.example.json", self.run_main(Path(tmp), (command,)), command)
+
+    def test_the_other_commands_work_without_a_profile_file(self):
+        """The server keeps each person's profile in their own folder and has no profile.json: `workday-add`, `rescore` and the rest must not ask for one."""
+        commands = {"workday-add": ("workday-add", "https://x.wd1.myworkdayjobs.com/s"), "rescore": ("rescore", "--user", "1"), "list": ("list",),
+                    "discover": ("discover", "acme"), "crawl": ("crawl",), "reformat": ("reformat",), "fetch": ("fetch",), "usage": ("usage",),
+                    "invite": ("invite", "list"), "mark": ("mark", "x", "saved")}
+        for name, argv in commands.items():
+            with tempfile.TemporaryDirectory() as tmp:
+                shutil.copy(ROOT / "config.example.yaml", Path(tmp) / "config.yaml")
+                handler = mock.Mock()
+                with mock.patch.object(main, "ROOT", Path(tmp)), mock.patch.object(sys, "argv", ["main.py", *argv]), mock.patch.object(main, "load_env"),                         mock.patch.object(main.db, "connect"), mock.patch.object(main.discovery, "load_config", return_value={}),                         mock.patch.object(main, "cmd_" + name.replace("-", "_"), handler):
+                    main.main()
+                handler.assert_called_once()
+                self.assertEqual(handler.call_args[0][2], {}, name)        # no profile: they are given an empty one
 
 
 class RepositoryHygieneTests(unittest.TestCase):
