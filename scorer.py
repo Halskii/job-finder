@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 
 import sources
 
@@ -21,6 +22,18 @@ Return ONLY a JSON object, no prose, with exactly these keys:
 {"fit_score": int 0-100, "verdict": "apply" | "maybe" | "skip", "matched": [short strings], "missing_required": [short strings],
  "dealbreakers": [short strings], "pay_notes": str, "location_notes": str, "resume_angle": "one sentence on what to emphasize",
  "reason": "one sentence"}"""
+
+
+THINKS_FIRST = re.compile(r"claude-(?:haiku|sonnet|opus|fable|mythos)-5")
+
+
+def request_options(model: str) -> dict:
+    """The size and effort of the request. The Claude 5 models think before they answer, and the thinking counts against `max_tokens`:
+    with 900 the answer was never written (20 of 22 scoring calls on Haiku 5.5 returned no JSON). A low effort keeps the thinking short
+    and 4096 leaves room for it; the cost of the thinking is in the output tokens `score_job` reports. Older models do not think."""
+    if THINKS_FIRST.match(model):
+        return {"max_tokens": 4096, "output_config": {"effort": "low"}}
+    return {"max_tokens": 900}
 
 
 def reply_text(msg) -> str:
@@ -54,8 +67,7 @@ def score_job(client, model: str, profile: dict, job, min_pay: int, resume_text:
         f"JOB POSTING\nCompany: {job['company']}\nTitle: {job['title']}\nLocation: {job['location']}\n"
         f"Listed pay: {pay}\nPosted: {job['posted'] or 'unknown'}\n\n{description}"
     )
-    msg = client.messages.create(model=model, max_tokens=900, system=SYSTEM,
-                                 messages=[{"role": "user", "content": user}])
+    msg = client.messages.create(model=model, system=SYSTEM, messages=[{"role": "user", "content": user}], **request_options(model))
     data = _extract_json(reply_text(msg))
     usage = getattr(msg, "usage", None)
     data["_in"] = int(getattr(usage, "input_tokens", 0) or 0)

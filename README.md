@@ -209,7 +209,7 @@ How it works:
 - `exclude_locations`: places to drop (California and its major cities are pre-filled). A posting is dropped only if **every** location it lists matches, so "San Francisco, CA | Remote - US" is kept because the remote option is still open to you. Matching is whole-word and case-insensitive, except two-letter state codes, which must be capitalized (`CA`). Add or remove entries freely, or delete the list to turn it off. Check what's stored with `python inspect_db.py --where "california"`.
 - `titles`: your title list (from `filter.txt`), and `exclude_title_words`
 - `gov_titles`: extra titles used only for government sources
-- `scoring`: `model`, `max_per_run` (cost cap), `workers` (API calls at the same time, default 8; lower it if you hit rate limits), `report_min_score`, `report_size`, `price_per_million_tokens`
+- `scoring`: `model`, `max_per_run` (cost cap), `workers` (API calls at the same time, default 8; lower it if you hit rate limits), `report_min_score`, `report_size`, `price_per_million_tokens` (the default model is `claude-haiku-5-5`, $0.10 in and $0.50 out per million tokens; the Claude 5 models think before they answer, so scoring asks them for a low effort and room for the thinking)
 - `profile_model`: the model used by `main.py profile`
 - `tailor_model`: the model behind the viewer's **Tailor resume** and **Cover letter** buttons
 - `onboard_model`: the model that suggests job titles on the profile page (default Haiku 5.5)
