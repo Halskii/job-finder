@@ -30,7 +30,7 @@ tips_model: claude-haiku-5-5       # used by the "Interview prep" button on a jo
 tips_web_search: true              # let it search the web for what candidates report (about 1 cent per search, plus the extra tokens)
 
 scoring:
-  model: claude-haiku-4-5-20251001   # cheap first pass; switch to claude-sonnet-5-5 for deeper analysis
+  model: claude-haiku-5-5            # cheap first pass (it thinks briefly at low effort, see scorer.py); claude-sonnet-5-5 costs about 17 times as much
   max_per_run: 40                    # cap LLM calls per `main.py run` to control cost
   initial_batch: 50                  # the web app scores this many of a user's best matches at once, so there is something to read straight away
   batch_size: 50                     # then keeps going in background batches of this size
@@ -38,7 +38,7 @@ scoring:
   workers: 8                          # scoring calls made at the same time (lower this if you see rate-limit errors)
   report_min_score: 60               # only show jobs scoring at least this in the report
   report_size: 1000
-  price_per_million_tokens: {input: 1.0, output: 5.0}   # USD for the scoring model above; edit if prices change
+  price_per_million_tokens: {input: 0.10, output: 0.50}   # USD for the scoring model above; edit if prices change
 
 # Job titles to look for. Level markers (I, II, III, Associate, Junior) are stripped automatically,
 # so "Software Engineer I" also matches a posting titled just "Software Engineer". Replace these with your own.

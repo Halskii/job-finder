@@ -29,7 +29,7 @@ from errors import UserError, explain
 
 log = logging.getLogger("job-finder")
 
-DEFAULTS = {"model": "claude-haiku-4-5-20251001", "initial_batch": 50, "batch_size": 50, "max_per_user_per_day": 400, "workers": 8}
+DEFAULTS = {"model": "claude-haiku-5-5", "initial_batch": 50, "batch_size": 50, "max_per_user_per_day": 400, "workers": 8}
 FATAL = {"no_api_key", "bad_api_key", "no_credit", "forbidden", "missing_package"}   # a failure every further call would repeat
 ACTIVE = ("queued", "matching", "scoring")
 connect_as = None   # connect_as(user id, or False for no user) opens a connection; the web app sets this, and by default it is db.connect
