@@ -509,6 +509,7 @@ td.actions-cell .btn{display:block;width:100%;padding:4px 8px;margin:0 0 4px}td.
 <dialog id="tailor-dlg"><form method="dialog">
 <h3 id="tailor-title"></h3><div class="muted" id="tailor-for"></div>
 <div class="muted" style="margin-top:8px">The box is optional. Leave it empty to use the defaults. Your request is followed as long as it stays true to your resume and profile.</div>
+<div class="muted" id="tailor-hint" style="margin-top:8px" hidden></div>
 <label for="tailor-request">Your request (optional)</label>
 <textarea id="tailor-request" maxlength="2000"></textarea>
 <div class="muted count" id="tailor-request-n"></div>
@@ -874,9 +875,12 @@ async function setStatus(j,status,explicit){
 }
 const DOCS={   // the two documents the buttons make; each has its own button, request box text, and progress
   resume:{label:"Tailor resume",what:"resume",btn:"tailor-btn",path:"/api/tailor",go:"Tailor",
+    start:j=>(j.resume_angle||"").trim(),   // the box opens with the resume angle scoring found for this posting; the person can change or clear it
+    hint:"Filled in with the resume angle from this job's score: what to emphasize for this posting. Change it, replace it, or clear the box to use the defaults.",
     placeholder:"e.g. Lead with my Kubernetes work and keep the skills section short",
     tip:"Uses Claude (Fable 5.1) to rewrite your resume for this posting, saved as a PDF and an editable Word file in the Optimized Resumes folder. Costs a few cents."},
   letter:{label:"Cover letter",what:"cover letter",btn:"letter-btn",path:"/api/letter",go:"Write",
+    start:()=>"",
     placeholder:"e.g. Mention that I am open to relocating, and keep it under 250 words",
     tip:"Uses Claude (Fable 5.1) to write a cover letter for this posting, saved as a PDF and an editable Word file in the Optimized Resumes folder. Costs a few cents."}};
 const REQUEST_MAX=2000;
@@ -928,9 +932,11 @@ function downloadCard(files){
 function askDoc(kind,j){
   const d=DOCS[kind],dlg=$("#tailor-dlg"),box=$("#tailor-request");
   $("#tailor-title").textContent=d.label;$("#tailor-go").textContent=d.go;$("#tailor-for").textContent=j.title+" at "+j.company;
-  box.placeholder=d.placeholder;box.value="";requestBox();
+  const start=d.start(j),hint=$("#tailor-hint");
+  box.placeholder=d.placeholder;box.value=start;requestBox();
+  hint.textContent=start?d.hint:"";hint.hidden=!start;
   dlg.querySelector("form").onsubmit=e=>{if(e.submitter&&e.submitter.value==="ok")makeDoc(kind,j,box.value.trim())};
-  dlg.showModal();box.focus();
+  dlg.showModal();box.focus();box.setSelectionRange(box.value.length,box.value.length);   // the cursor goes after the filled-in text, ready to add to it
 }
 async function makeDoc(kind,j,request){
   const d=DOCS[kind],btn=$("#"+d.btn),state=docState[kind];
