@@ -1,0 +1,39 @@
+{
+ "tool": "search_jobs",
+ "results": [
+  {
+   "requisitionId": "559089_external_USA-MA-Hudson",
+   "title": "Store Manager",
+   "department": "Retail Operations",
+   "location": "Hudson, MA, USA",
+   "employmentType": "Full Time",
+   "datePosted": "2026-10-20",
+   "applyUrl": "https://aholddelhaizeapply.appvault.com/external/home?jobId=559089&company=The Stop and Shop Supermarket Company LLC",
+   "description": "Category/Area of Expertise: Retail Operations Job Requisition: 559089 Address: USA-MA-Hudson-10 Technology Drive Store Code: Human Resources - Brands 5148906 Here at Stop & Shop, we've been serving our customers and neighborhoods for more than a century. A lot has changed in that time, but one thing"
+  },
+  {
+   "requisitionId": "559089_external_USA-MA-Peabody",
+   "title": "Store Manager",
+   "department": "Retail Operations",
+   "location": "Peabody, MA, USA",
+   "employmentType": "Full Time",
+   "datePosted": "2026-10-20",
+   "applyUrl": "https://aholddelhaizeapply.appvault.com/external/home?jobId=559089&company=The Stop and Shop Supermarket Company LLC",
+   "description": "Category/Area of Expertise: Retail Operations Job Requisition: 559089 Address: USA-MA-Peabody-19 Howley Street Store Code: Human Resources - Brands 5148906 Here at Stop & Shop, we've been serving our customers and neighborhoods for more than a century. A lot has changed in that time, but one thing h"
+  },
+  {
+   "requisitionId": "559089_external_USA-MA-North-Reading",
+   "title": "Store Manager",
+   "department": "Retail Operations",
+   "location": "North Reading, MA, USA",
+   "employmentType": "Full Time",
+   "datePosted": "2026-10-20",
+   "applyUrl": "https://aholddelhaizeapply.appvault.com/external/home?jobId=559089&company=The Stop and Shop Supermarket Company LLC",
+   "description": "Category/Area of Expertise: Retail Operations Job Requisition: 559089 Address: USA-MA-North Reading-265 Main St Store Code: Human Resources - Brands 5148906 Here at Stop & Shop, we've been serving our customers and neighborhoods for more than a century. A lot has changed in that time, but one thing "
+  }
+ ],
+ "totalCount": 178,
+ "page": 1,
+ "pageSize": 100,
+ "summary": "Found 178 jobs matching \"store manager\""
+}

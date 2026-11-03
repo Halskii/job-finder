@@ -102,8 +102,11 @@ def ensure_details(conn, ids: list, workers: int = 16, delay: float = 0.4) -> in
             conn.execute("UPDATE postings SET detail_tries = detail_tries + 1 WHERE id = ?", (j.id,))
             continue
         sources.fill_pay(j)
-        conn.execute("UPDATE postings SET description = ?, location = ?, posted = ?, pay_min = ?, pay_max = ?, pay_unit = ?, formatted = 1 WHERE id = ?",
-                     (j.description, j.location, j.posted, j.pay_min, j.pay_max, j.pay_unit or "year", j.id))
+        # A site whose list shows only a rough title (Home Depot) gives the real title here, and one with several brands (Gap Inc.) the brand.
+        conn.execute("UPDATE postings SET title = ?, company = ?, dedupe_key = ?, description = ?, location = ?, posted = ?, pay_min = ?, pay_max = ?,"
+                     " pay_unit = ?, formatted = 1 WHERE id = ?",
+                     (j.title, j.company, db.dedupe_key(j.company, j.title), j.description, j.location, j.posted, j.pay_min, j.pay_max,
+                      j.pay_unit or "year", j.id))
     conn.commit()
     return sum(1 for j in jobs if j.id in failed or not j.description)
 

@@ -38,6 +38,8 @@ PATTERNS = {
     "personio": ["*.jobs.personio.de", "*.jobs.personio.com"],
     "workday": ["*.myworkdayjobs.com"],
 }
+if not sources.SMARTRECRUITERS_ALLOWED:
+    PATTERNS.pop("smartrecruiters")   # its API host's robots.txt keeps programs out, so no board is looked up there
 # first path segments / subdomains that are part of the platform itself, not a company
 NOT_A_COMPANY = {"", "www", "api", "app", "apply", "careers", "jobs", "embed", "v1", "static", "assets", "images", "img", "cdn",
                  "help", "support", "blog", "login", "signin", "robots.txt", "favicon.ico", "sitemap.xml", "about", "pricing",

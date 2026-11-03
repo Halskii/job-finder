@@ -27,6 +27,7 @@ import discovery
 import feed_sources
 import filters
 import gov_sources
+import retail_sources
 import scorer
 import sources
 
@@ -85,7 +86,10 @@ PLATFORMS = [kind for kind, _, _ in discovery.BOARD_FETCHERS] + ["workday"]   # 
 
 
 def platform_enabled(cfg: dict, name: str) -> bool:
-    """False when the `platforms:` section of config.yaml turns this board platform off. One that is not listed is on."""
+    """False when the `platforms:` section of config.yaml turns this board platform off. One that is not listed is on.
+    SmartRecruiters is off whatever the file says while its API host's robots.txt keeps programs out (sources.SMARTRECRUITERS_ALLOWED)."""
+    if name == "smartrecruiters" and not sources.SMARTRECRUITERS_ALLOWED:
+        return False
     return bool((cfg.get("platforms") or {}).get(name, True))
 
 
@@ -99,7 +103,7 @@ def collect(cfg: dict, conn=None, outcomes: list | None = None) -> list[sources.
             log(f"  platforms: '{name}' is not a platform name (ignored). Names: {', '.join(PLATFORMS)}")
     for kind in PLATFORMS:
         if not platform_enabled(cfg, kind) and src.get(kind):
-            log(f"  {kind:10s} turned off in config.yaml (platforms), {len(src[kind])} board(s) not read")
+            log(f"  {kind:10s} turned off (config.yaml `platforms`, or its site does not allow programs), {len(src[kind])} board(s) not read")
     plan = [(kind, getattr(mod, fn)) for kind, mod, fn in discovery.BOARD_FETCHERS if platform_enabled(cfg, kind)]
     tasks = [(kind, fn, slug) for kind, fn in plan for slug in src.get(kind, []) or []]
     workday = (src.get("workday", []) or []) if platform_enabled(cfg, "workday") else []
@@ -131,6 +135,37 @@ def collect(cfg: dict, conn=None, outcomes: list | None = None) -> list[sources.
     jobs += collect_workday(cfg, workday, delay, outcomes)
     jobs += collect_feeds(cfg, conn)
     jobs += collect_government(cfg)
+    jobs += collect_retail(cfg)
+    return jobs
+
+
+def collect_retail(cfg: dict) -> list[sources.Job]:
+    """Retailer career sites (Lowe's, ...), on by default; set `enabled: false` under `retailers:` in config.yaml to turn one off.
+    Each is searched with the same title words as Workday plus `retail_titles` (store and warehouse jobs), since a retailer lists
+    thousands of store jobs next to a few corporate roles and the search has to name the kind of job wanted."""
+    conf_all = cfg.get("retailers") or {}
+    delay = cfg.get("request_delay", 0.4)
+    terms = filters.workday_terms(cfg)
+    terms += [t for t in filters.base_title_strings(cfg.get("retail_titles", [])) if t not in terms]
+    plan = [p for p in retail_sources.RETAIL_SOURCES if (conf_all.get(p[0]) or {}).get("enabled", True)]
+
+    def one(item):
+        conf = conf_all.get(item[0]) or {}
+        try:
+            return item, getattr(retail_sources, item[2])(conf.get("search_terms") or terms, conf.get("pages", 8), delay), None
+        except Exception as e:   # a site that is down or renamed must not stop the others
+            return item, [], e
+
+    jobs: list[sources.Job] = []
+    with ThreadPoolExecutor(max_workers=max(1, len(plan))) as pool:   # different servers, so read at once; each is read one request at a time
+        futures = [pool.submit(one, p) for p in plan]
+        done = {}
+        for fut in as_completed(futures):
+            (key, label, _), got, err = done[id(fut)] = fut.result()
+            name = f"{key:12s} {'(' + label + ')':14s}"
+            log(f"  {name} skipped ({type(err).__name__}: {str(err)[:70]})" if err else f"  {name} {len(got):4d} postings")
+        for f in futures:   # keep the order of the list, whatever order the sites finished in
+            jobs += done[id(f)][1]
     return jobs
 
 
@@ -139,10 +174,11 @@ def collect_workday(cfg: dict, entries: list[dict], delay: float, outcomes: list
     each site is still read one request at a time, with `request_delay` between requests."""
     terms, pages = filters.workday_terms(cfg), cfg.get("workday_max_pages", 3)
     gov_terms = terms + [t for t in filters.base_title_strings(cfg.get("gov_titles", [])) if t not in terms]
+    retail_terms = terms + [t for t in filters.base_title_strings(cfg.get("retail_titles", [])) if t not in terms]
 
     def one(entry):
-        try:   # an entry marked `gov: true` (a city, university, or agency) is also searched with the government titles
-            return entry, sources.fetch_workday(entry, gov_terms if entry.get("gov") else terms, pages, delay), None
+        try:   # an entry marked `gov: true` (a city, university, or agency) is also searched with the government titles, and `retail: true` with the retail ones
+            return entry, sources.fetch_workday(entry, gov_terms if entry.get("gov") else retail_terms if entry.get("retail") else terms, pages, delay), None
         except Exception as e:   # a site that is down or renamed must not stop the others
             return entry, [], e
 
@@ -326,7 +362,9 @@ def cmd_run(args, cfg, profile, conn) -> None:
     t_list = time.time() - t0
     patterns = filters.base_titles(cfg["titles"])
     gov_patterns = patterns + filters.base_titles(cfg.get("gov_titles", []))   # government titles read differently
-    exclude = [w.lower() for w in cfg.get("exclude_title_words", [])]
+    retail_patterns = patterns + filters.base_titles(cfg.get("retail_titles", []))   # store and warehouse titles at the retailers
+    retail_keys = {key for key, *_ in retail_sources.RETAIL_SOURCES}
+    exclude =[w.lower() for w in cfg.get("exclude_title_words", [])]
     loc_excl = filters.compile_exclusions(cfg.get("exclude_locations", []))
     # How many postings each step dropped or kept; printed as the one-line summary after filtering.
     stats = {"fetched": len(jobs), "title": 0, "location": 0, "excluded": 0, "pay": 0, "age": 0, "new": 0, "seen": 0, "dupe": 0, "late": 0}
@@ -336,7 +374,8 @@ def cmd_run(args, cfg, profile, conn) -> None:
     candidates = []
     for job in jobs:
         use_gov = job.source in gov_sources.GOV_SOURCES or job.detail.get("gov")
-        if not filters.title_ok(job.title, gov_patterns if use_gov else patterns, exclude):
+        use_retail = job.source in retail_keys or job.detail.get("retail")
+        if not filters.title_ok(job.title, gov_patterns if use_gov else retail_patterns if use_retail else patterns, exclude):
             continue
         stats["title"] += 1
         if not filters.location_ok(job.location, cfg.get("us_only", True)):
@@ -498,7 +537,7 @@ def cmd_discover(args, cfg, profile, conn) -> None:
     for name in names:
         hits = discovery.probe(name, cfg.get("request_delay", 0.4))
         if not hits:
-            log(f"{name}: no board found on {', '.join(discovery.LIST_KEYS)}. If it uses Workday, run: "
+            log(f"{name}: no board found on {', '.join(k for k, _ in discovery.SYSTEMS)}. If it uses Workday, run: "
                 f"python main.py workday-add <careers page URL>")
             continue
         for h in hits:
@@ -560,6 +599,8 @@ def cmd_workday_add(args, cfg, profile, conn) -> None:
         return
     if getattr(args, "gov", False):
         entry["gov"] = True   # a state, city or university: also searched with the government titles
+    if getattr(args, "retail", False):
+        entry["retail"] = True   # a retailer: also searched with the retail titles
     try:
         total = discovery.check_workday(entry)
     except Exception as e:
@@ -718,6 +759,7 @@ def main() -> None:
     w.add_argument("url")
     w.add_argument("--name", help="label to show for the company")
     w.add_argument("--gov", action="store_true", help="a government employer (state, city, university): also search it with gov_titles")
+    w.add_argument("--retail", action="store_true", help="a retailer: also search it with retail_titles (store, warehouse and other hourly jobs)")
     args = ap.parse_args()
 
     if not (ROOT / "config.yaml").exists():

@@ -15,7 +15,7 @@ from datetime import date, datetime, timedelta, timezone
 
 import requests
 
-UA = {"User-Agent": "job-finder/0.1 (personal job search tool)"}
+UA = {"User-Agent": "job-finder/0.1 (personal job search tool; github.com/Halskii/job-finder)"}   # names the project, as crawl.py's does; one retailer's server turns away the shorter form
 TIMEOUT = 30
 
 
@@ -151,7 +151,7 @@ def strip_html(text: str, plain: bool = False) -> str:
     return re.sub(r"(?m)^(#+ |\s*- )", "", out).replace("**", "") if plain else out
 
 
-_AMOUNT = r"(\d{2,3}(?:,\d{3})+|\d{2,3}(?:\.\d+)?\s?[kK])"
+_AMOUNT = r"(\d{2,3}(?:,\d{3})+(?:\.\d{2})?|\d{2,3}(?:\.\d+)?\s?[kK])"   # $120,000 or $120,000.00 or $120k
 PAY_RE = re.compile(r"\$\s?" + _AMOUNT + r"\s*(?:-|–|—|to)\s*\$?\s?" + _AMOUNT)
 
 
@@ -346,7 +346,7 @@ def fetch_workday(entry: dict, search_terms: list[str], max_pages: int, delay: f
                     id=f"wd:{tenant}:{path.rsplit('_', 1)[-1] or path}", source="workday", company=name,
                     title=p.get("title", ""), location=p.get("locationsText", ""),
                     url=f"https://{host}/en-US/{site}{path}", posted=workday_posted(p.get("postedOn", "")),
-                    detail={"api": f"{base}{path}", **({"gov": True} if entry.get("gov") else {})},
+                    detail={"api": f"{base}{path}", **({"gov": True} if entry.get("gov") else {}), **({"retail": True} if entry.get("retail") else {})},
                 )
             time.sleep(delay)
             if len(postings) < 20 or (total is not None and (page + 1) * 20 >= total):
@@ -369,11 +369,20 @@ def fill_workday_detail(job: Job) -> None:
 # ----------------------------------------------------------------------------- SmartRecruiters
 SR_PAGE = 100
 SR_MAX = 500   # per company; the list is already limited to US postings
+# api.smartrecruiters.com/robots.txt reads "User-agent: * / Disallow: /" (only LinkedIn's crawler is let in), so programs stay out. While this is
+# False nothing here asks that host: the list and the posting reader refuse, and the crawl, `discover` and the platform list leave it out.
+SMARTRECRUITERS_ALLOWED = False
+
+
+def _smartrecruiters_check() -> None:
+    if not SMARTRECRUITERS_ALLOWED:
+        raise PermissionError("api.smartrecruiters.com/robots.txt does not allow programs, so SmartRecruiters is not read")
 
 
 def fetch_smartrecruiters(slug: str) -> list[Job]:
     """List a company's US postings. The list has no description, so details are filled in later and only
     for postings that pass the title filter (see fill_detail). An unknown company id returns an empty list."""
+    _smartrecruiters_check()
     jobs: list[Job] = []
     offset = 0
     while offset < SR_MAX:
@@ -400,6 +409,7 @@ def fetch_smartrecruiters(slug: str) -> list[Job]:
 
 
 def fill_smartrecruiters_detail(job: Job) -> None:
+    _smartrecruiters_check()
     info = _get(job.detail["api"])
     sections = (info.get("jobAd") or {}).get("sections") or {}
     parts = [strip_html((sections.get(k) or {}).get("text", ""))

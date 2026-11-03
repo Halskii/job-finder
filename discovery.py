@@ -30,8 +30,8 @@ BOARD_FETCHERS = [   # (system, module, function name): the function is looked u
     ("gem", ats_sources, "fetch_gem"),
     ("personio", ats_sources, "fetch_personio"),
 ]
-SYSTEMS = [(name, getattr(mod, fn)) for name, mod, fn in BOARD_FETCHERS]
-LIST_KEYS = tuple(k for k, _ in SYSTEMS)
+SYSTEMS = [(name, getattr(mod, fn)) for name, mod, fn in BOARD_FETCHERS if name != "smartrecruiters" or sources.SMARTRECRUITERS_ALLOWED]
+LIST_KEYS = tuple(name for name, *_ in BOARD_FETCHERS)   # every platform whose boards can be stored, whether or not it is read right now
 COMPANY_SUFFIXES = {"inc", "llc", "ltd", "corp", "corporation", "co", "company", "plc", "the"}
 LOCALE_RE = re.compile(r"^[a-z]{2}(?:-[A-Za-z]{2})?$")
 

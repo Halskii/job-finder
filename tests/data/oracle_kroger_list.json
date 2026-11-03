@@ -1,0 +1,229 @@
+{
+ "items": [
+  {
+   "Keyword": "manager",
+   "Offset": 0,
+   "Limit": 200,
+   "TotalJobsCount": 10841,
+   "SiteNumber": "CX_2001",
+   "flexFieldsFacet": [
+    {
+     "Name": "AttributeChar4",
+     "Label": "Line of Business"
+    },
+    {
+     "Name": "AttributeChar1",
+     "Label": "Banner Name"
+    },
+    {
+     "Name": "AttributeChar17",
+     "Label": "Shift Info"
+    }
+   ],
+   "requisitionList": [
+    {
+     "Id": "246646",
+     "Title": "JEWELRY/ASST MANAGER",
+     "PostedDate": "2026-11-03",
+     "PostingEndDate": null,
+     "Language": "US",
+     "PrimaryLocationCountry": "US",
+     "GeographyId": 300000190325964,
+     "HotJobFlag": false,
+     "WorkplaceTypeCode": "ORA_ON_SITE",
+     "JobFamily": null,
+     "JobFunction": null,
+     "WorkerType": null,
+     "ContractType": null,
+     "ManagerLevel": null,
+     "JobSchedule": "Full time",
+     "JobShift": null,
+     "JobType": null,
+     "StudyLevel": null,
+     "DomesticTravelRequired": null,
+     "InternationalTravelRequired": null,
+     "WorkDurationYears": null,
+     "WorkDurationMonths": null,
+     "WorkHours": null,
+     "WorkDays": null,
+     "LegalEmployer": null,
+     "BusinessUnit": null,
+     "Department": null,
+     "Organization": null,
+     "BusinessUnitId": 300000002612086,
+     "LegalEmployerId": 300000002539150,
+     "OrganizationId": 300000188150864,
+     "ShortDescriptionStr": "",
+     "PrimaryLocation": "Caldwell, ID, United States",
+     "Distance": 1793664000000.0,
+     "TrendingFlag": false,
+     "BeFirstToApplyFlag": true,
+     "Relevancy": 54.284584045410156,
+     "WorkplaceType": "On-site",
+     "ExternalQualificationsStr": null,
+     "ExternalResponsibilitiesStr": null,
+     "secondaryLocations": [],
+     "requisitionFlexFields": [
+      {
+       "ContextCode": "Global Data Elements",
+       "SegmentCode": "KR_REC_BANNER_NAME",
+       "Prompt": "Banner Name",
+       "Value": "Fred Meyer Jewelers",
+       "DATATYPE": "String"
+      },
+      {
+       "ContextCode": "Global Data Elements",
+       "SegmentCode": "KR_REC_HOURLY_SALARIED",
+       "Prompt": "Hourly or Salaried",
+       "Value": "Hourly",
+       "DATATYPE": "String"
+      },
+      {
+       "ContextCode": "Global Data Elements",
+       "SegmentCode": "KR_REC_SHIFT_INFO_DFF",
+       "Prompt": "Shift Info",
+       "Value": null,
+       "DATATYPE": "String"
+      }
+     ]
+    },
+    {
+     "Id": "248113",
+     "Title": "DAIRY/DEPT LEADER",
+     "PostedDate": "2026-11-03",
+     "PostingEndDate": null,
+     "Language": "US",
+     "PrimaryLocationCountry": "US",
+     "GeographyId": 300000190322973,
+     "HotJobFlag": false,
+     "WorkplaceTypeCode": null,
+     "JobFamily": null,
+     "JobFunction": null,
+     "WorkerType": null,
+     "ContractType": null,
+     "ManagerLevel": null,
+     "JobSchedule": "Full time",
+     "JobShift": null,
+     "JobType": null,
+     "StudyLevel": null,
+     "DomesticTravelRequired": null,
+     "InternationalTravelRequired": null,
+     "WorkDurationYears": null,
+     "WorkDurationMonths": null,
+     "WorkHours": null,
+     "WorkDays": null,
+     "LegalEmployer": null,
+     "BusinessUnit": null,
+     "Department": null,
+     "Organization": null,
+     "BusinessUnitId": 300000002612086,
+     "LegalEmployerId": 300000002564644,
+     "OrganizationId": 300000188377890,
+     "ShortDescriptionStr": "",
+     "PrimaryLocation": "San Diego, CA, United States",
+     "Distance": 1793664000000.0,
+     "TrendingFlag": false,
+     "BeFirstToApplyFlag": true,
+     "Relevancy": 17.97249984741211,
+     "WorkplaceType": "",
+     "ExternalQualificationsStr": null,
+     "ExternalResponsibilitiesStr": null,
+     "secondaryLocations": [],
+     "requisitionFlexFields": [
+      {
+       "ContextCode": "Global Data Elements",
+       "SegmentCode": "KR_REC_BANNER_NAME",
+       "Prompt": "Banner Name",
+       "Value": "Ralphs",
+       "DATATYPE": "String"
+      },
+      {
+       "ContextCode": "Global Data Elements",
+       "SegmentCode": "KR_REC_HOURLY_SALARIED",
+       "Prompt": "Hourly or Salaried",
+       "Value": "Hourly",
+       "DATATYPE": "String"
+      },
+      {
+       "ContextCode": "Global Data Elements",
+       "SegmentCode": "KR_REC_SHIFT_INFO_DFF",
+       "Prompt": "Shift Info",
+       "Value": null,
+       "DATATYPE": "String"
+      }
+     ]
+    },
+    {
+     "Id": "248154",
+     "Title": "SEAFOOD/DEPT LEADER",
+     "PostedDate": "2026-11-03",
+     "PostingEndDate": null,
+     "Language": "US",
+     "PrimaryLocationCountry": "US",
+     "GeographyId": 300000190355292,
+     "HotJobFlag": false,
+     "WorkplaceTypeCode": "ORA_ON_SITE",
+     "JobFamily": null,
+     "JobFunction": null,
+     "WorkerType": null,
+     "ContractType": null,
+     "ManagerLevel": null,
+     "JobSchedule": "Part time",
+     "JobShift": null,
+     "JobType": null,
+     "StudyLevel": null,
+     "DomesticTravelRequired": null,
+     "InternationalTravelRequired": null,
+     "WorkDurationYears": null,
+     "WorkDurationMonths": null,
+     "WorkHours": null,
+     "WorkDays": null,
+     "LegalEmployer": null,
+     "BusinessUnit": null,
+     "Department": null,
+     "Organization": null,
+     "BusinessUnitId": 300000002612086,
+     "LegalEmployerId": 300000002539300,
+     "OrganizationId": 300000194180263,
+     "ShortDescriptionStr": "",
+     "PrimaryLocation": "Rock Springs, WY, United States",
+     "Distance": 1793664000000.0,
+     "TrendingFlag": false,
+     "BeFirstToApplyFlag": true,
+     "Relevancy": 17.15762710571289,
+     "WorkplaceType": "On-site",
+     "ExternalQualificationsStr": null,
+     "ExternalResponsibilitiesStr": null,
+     "secondaryLocations": [],
+     "requisitionFlexFields": [
+      {
+       "ContextCode": "Global Data Elements",
+       "SegmentCode": "KR_REC_BANNER_NAME",
+       "Prompt": "Banner Name",
+       "Value": "Smith's Food and Drug",
+       "DATATYPE": "String"
+      },
+      {
+       "ContextCode": "Global Data Elements",
+       "SegmentCode": "KR_REC_HOURLY_SALARIED",
+       "Prompt": "Hourly or Salaried",
+       "Value": "Hourly",
+       "DATATYPE": "String"
+      },
+      {
+       "ContextCode": "Global Data Elements",
+       "SegmentCode": "KR_REC_SHIFT_INFO_DFF",
+       "Prompt": "Shift Info",
+       "Value": null,
+       "DATATYPE": "String"
+      }
+     ]
+    }
+   ]
+  }
+ ],
+ "count": 1,
+ "hasMore": false,
+ "limit": 200,
+ "offset": 0
+}

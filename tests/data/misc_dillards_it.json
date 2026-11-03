@@ -1,0 +1,70 @@
+{
+ "data": [
+  {
+   "expireOn": "2026-12-01T06:00:00Z",
+   "locationInfo": {
+    "zipCode": "72201",
+    "address": "1600 CANTRELL",
+    "city": "Little Rock",
+    "locationId": "51706ccbe4b03bc5447faff0",
+    "state": "AR"
+   },
+   "additionalKnockoutQuestions": true,
+   "updatedBy": "FULLEJ",
+   "groupingId": 2469,
+   "approvedBy": "FULLEJ",
+   "description": "THE OPPORTUNITY\r\n\r\nJoin our Customer 360 development team at a pivotal moment in our technological evolution. We are building the next generation of our customer database, moving toward a unified source of truth that powers critical enterprise applications.  In this role, your work will directly influence the customer experience by ensuring that every interaction—from personalized shopping recommendations to enterprise support—is informed by accurate, comprehensive data.  You will collaborate closely with a dedicated team of developers to transform complex data ingestion workflows into streamlined, automated processes.  We are looking for a forward-thinking developer who is passionate about data integrity, excellence in software development, and creating tools that drive measurable business growth.\r\n\r\n\r\nTHE TEAM\r\n\r\nThe Customer 360 team is a cross-functional, collaborative group dedicated to building the definitive \"source of truth\" for Dillard's customer intelligence.  We are a high-trust, self-driven team that values curiosity and adaptability as we modernize our customer data strategy to provide a holistic, full-view understanding of our customers.  Our scope encompasses the full data lifecycle—from initial research and data modeling to designing robust APIs and developing complex, scalable batch processes. We are looking for a senior developer who is ready to take ownership of foundational systems, champion architectural integrity, and thrive within a team that is as passionate about software development as it is about the success of our colleagues.\r\n\r\nLocation & Hours:  This is a full-time, on-site position located at our Little Rock, Arkansas headquarters. A high level of attendance is required as an essential function of this position.\r\n\r\nNo immigration sponsorship (ex. H-1B, TN, STEM OPT) is available for this position",
+   "desiredSkills": "Data Strategy Expertise: Experience with Master Data Management (MDM) concepts, Customer Data Platforms (CDP), or data governance strategies in an enterprise environment.\r\nRelational Database Depth: Proficiency in IBM Db2 (LUW) or similar relational database management systems.\r\nDistributed Systems & Big Data: Familiarity with high-volume, distributed data processing frameworks or NoSQL database patterns.\r\nObservability & Performance Tuning: Experience designing systems with comprehensive monitoring and logging, or a track record of performance tuning for complex, high-throughput batch processes.\r\nData Security & Privacy: Familiarity with secure data handling techniques and compliance standards, ensuring sensitive information is protected throughout its lifecycle.\r\nContainerized Development Experience: Familiarity with containerized environments, container orchestration (e.g., Kubernetes), and best practices for packaging and deploying enterprise applications.",
+   "updatedOn": "2026-10-27T17:17:40Z",
+   "approvalNeededBy": "FULLEJ",
+   "title": "Senior Developer",
+   "postOn": "2026-10-27T05:00:00Z",
+   "approvedOn": "2026-10-27T17:17:18Z",
+   "requestedBy": "FULLEJ",
+   "responsibilities": "Design & Model Data: Architect and implement scalable data models that serve as the foundation for a unified \"source of truth\" for Dillard's customer data.\r\nArchitect Ingestion Pipelines: Develop and maintain complex, high-throughput batch processes to ingest, standardize, validate, and deduplicate customer data from disparate sources.\r\nBuild Robust APIs: Design and develop high-performance backend services and APIs using Spring Boot and Java to power enterprise-wide customer engagement applications.\r\nModernize Infrastructure: Drive the architectural integrity of our platforms by creating and maintaining CI/CD pipelines and leveraging containerization for deployment across multiple-environments.\r\nChampion Development Standards: Uphold technical excellence through rigorous code reviews, automated testing, and proactive vulnerability remediation.\r\nCollaborate & Innovate: Engage actively within our cross-functional, co-located team, leveraging AI-assisted development tools and continuous research to stay ahead of industry standards and deliver new features.",
+   "greenhouseUrl": "https://job-boards.greenhouse.io/dillards/jobs/5103839007",
+   "workArea": "Information Technology",
+   "locationId": "51706ccbe4b03bc5447faff0",
+   "requestedOn": "2026-10-27T17:16:14Z",
+   "minYearsExperience": 3,
+   "requiredSkills": "Expert Java Development: Deep proficiency in Java, Spring Boot, and associated ecosystems; or similar tech stack.\r\nData Modeling Proficiency: Demonstrated experience in architecting, developing, and optimizing data ingestion pipelines, batch processes, and complex data models.\r\nSystem Design & Architecture: Strong understanding of scalable architectural patterns, API design, and best practices for creating maintainable, high-throughput backend services.\r\nVersion Control & CI/CD: Advanced proficiency with Git-based source control and the ability to maintain robust CI/CD pipelines in a containerized environment.\r\nStrategic Problem-Solving: A proven ability to own the full lifecycle of a feature, from research and design to implementation, testing, and deployment.\r\nCollaborative Mindset: Exceptional communication skills with a track record of thriving in cross-functional, co-located teams and mentoring junior developers.\r\nAI-Enabled Development: A forward-thinking, adaptive mindset with a strong desire to integrate AI-assisted development tools (like Copilot/Gemini) into all facets of the software development lifecycle.",
+   "id": "6ae0dc5e4ef98d3965bc1304",
+   "categories": [
+    "isTechnology"
+   ]
+  },
+  {
+   "expireOn": "2026-12-01T06:00:00Z",
+   "locationInfo": {
+    "zipCode": "72201",
+    "address": "1600 CANTRELL",
+    "city": "Little Rock",
+    "locationId": "51706ccbe4b03bc5447faff0",
+    "state": "AR"
+   },
+   "additionalKnockoutQuestions": true,
+   "updatedBy": "FULLEJ",
+   "groupingId": 2474,
+   "approvedBy": "FULLEJ",
+   "description": "THE OPPORTUNITY\r\n\r\nWe are seeking an experienced ServiceNow Developer to build and maintain solutions across IT Service Management (ITSM) and custom-scoped applications.\r\n\r\nTHE TEAM\r\n\r\nThis role is on our Software Integration and Administration team, which consists of closely-knit team members who value diverse skills, experiences, and perspectives. Our team is constantly evolving, requiring a high degree of adaptability and initiative. We foster a collaborative environment where you’ll receive the support you need to master new technologies, grow your skill set, and contribute to our collective success.\r\n\r\nLocation & Hours:  This is a full-time, on-site position located at our Little Rock, Arkansas headquarters. A high level of attendance is required as an essential function of this position.\r\n\r\nNo immigration sponsorship (ex. H-1B, TN, STEM OPT) is available for this position",
+   "desiredSkills": "Skilled at working within a team-oriented, collaborative environment\r\nCertified Implementation Specialist credentials (ITSM)\r\nFamiliarity with ServiceNow App Engine Studio (AES)\r\nExperience in application development, with proficiency in Java, JavaScript, or PowerShell preferred\r\nStrong technical documentation skills",
+   "updatedOn": "2026-10-30T20:11:02Z",
+   "approvalNeededBy": "FULLEJ",
+   "title": "ServiceNow Developer",
+   "postOn": "2026-10-30T05:00:00Z",
+   "approvedOn": "2026-10-30T20:10:18Z",
+   "requestedBy": "FULLEJ",
+   "responsibilities": "The responsibilities below represent the core functions of the role and are not an exhaustive list of all duties.\r\nDevelop and configure ServiceNow solutions (workflows, scripting, integrations, UI, and extensions).\r\nEnsure platform stability, performance, and upgrade-readiness using best practices.\r\nDeliver production-ready solutions and balance declarative with programmatic development.\r\nArchitect and automate business processes while identifying needs through team coordination.\r\nBuild strong relationships with vendors and clients to meet quality standards.\r\nWrite and maintain high-quality code that remains stable through upgrades.\r\nProactively identify solutions to business-impacting IT issues.\r\nTranslate business goals into technical requirements while acting as a bridge between infrastructure teams and end-users.\r\nParticipate in an on-call rotation.",
+   "workArea": "Information Technology",
+   "locationId": "51706ccbe4b03bc5447faff0",
+   "requestedOn": "2026-10-30T20:09:19Z",
+   "minYearsExperience": 3,
+   "requiredSkills": "Authorization to work in the United States without sponsorship\r\nAbility to work onsite at Corporate Headquarters in Little Rock, AR\r\nServiceNow Certified Application Developer (CAD) certification\r\nBachelor’s degree in Computer Science, Information Systems, or a related field\r\nThree or more years of hands-on ServiceNow development experience\r\nExperience with Workflow Studio and IntegrationHub\r\nHands-on integration experience using MID Servers\r\nStrong understanding of the ServiceNow data model and CMDB concepts\r\nAnalytical and problem-solving abilities\r\nExcellent oral and interpersonal communication skills\r\nProficient in scripting and automation, with strong system analysis and client-solution skills\r\nExperience leveraging AI-assisted development tools to accelerate coding, troubleshooting, and platform configuration",
+   "id": "6ae4f96fe8217d3eaa840432",
+   "categories": [
+    "isTechnology"
+   ]
+  }
+ ],
+ "locations": []
+}
