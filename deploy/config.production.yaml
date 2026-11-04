@@ -5,7 +5,8 @@
 max_age_days: 30          # how recent a posting must be for the job feeds and government sources to return it
 crawl_every_days: 30    # the web app looks for new company boards (for everyone's titles) this often. 0 = only when you run `python main.py crawl --add`
 fetch_every_hours: 24    # the app reads every source for all users once a day
-keep_postings_days: 14   # postings no source has listed for this long are deleted (unless a user has them as one of their jobs)
+retry_hours: 24          # after starting a crawl or a fetch the app waits a day before another, so a crawl that keeps failing cannot repeat them hourly
+keep_postings_days: 14  # postings no source has listed for this long are deleted (unless a user has them as one of their jobs)
 store_max_age_days: 90   # postings clearly older than this are not stored at all
 # Paid calls (scoring, resume tailoring, interview prep, resume reading) allowed per day: for one person, and for the whole site together.
 # Scoring's per-person limit is scoring.max_per_user_per_day. Read on every check, so edits apply at once. paused: true stops them all (a kill switch).

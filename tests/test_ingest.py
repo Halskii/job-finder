@@ -8,6 +8,8 @@ from datetime import date, timedelta
 from pathlib import Path
 from unittest import mock
 
+import psycopg
+
 import auth
 import db
 import ingest
@@ -217,7 +219,7 @@ class FetchRunTests(Base):
         self.admin.commit()
         seen = {}
 
-        def collect(cfg, conn, outcomes=None):
+        def collect(cfg, conn, outcomes=None, sink=None):
             seen["titles"] = cfg["titles"]
             return [job("a"), job("b", company="B")]
         with mock.patch.object(main, "collect", collect), mock.patch.object(main.discovery, "load_config", return_value={"titles": ["Platform Engineer"]}):
@@ -229,6 +231,25 @@ class FetchRunTests(Base):
         self.assertEqual(pipeline.status(conn)["state"], "queued")
         conn.close()
         self.assertFalse(ingest.due(self.anon, 24))                                  # it just ran
+
+    def test_postings_handed_over_while_reading_are_stored_and_counted_with_the_rest(self):
+        def collect(cfg, conn, outcomes=None, sink=None):
+            sink([job("a"), job("b", company="B")])           # what a big reader does as each source finishes
+            sink([job("a"), job("c", company="C")])           # "a" again: the same posting listed twice is stored once
+            return [job("d", company="D")]                      # and what is left comes back as before
+        with mock.patch.object(main, "collect", collect), mock.patch.object(main.discovery, "load_config", return_value={"titles": []}):
+            stats = ingest.run_fetch(queue_users=False)
+        self.assertEqual((stats["fetched"], stats["new"], stats["skipped_old"]), (5, 4, 0))
+        self.assertEqual(self.anon.execute("SELECT COUNT(*) AS n FROM postings").fetchone()["n"], 4)
+
+    def test_the_saver_counts_too_old_postings_and_leaves_no_transaction_open(self):
+        saver = ingest.Saver(self.admin, 30)
+        self.assertEqual(self.admin.raw.info.transaction_status, psycopg.pq.TransactionStatus.IDLE)   # not held open while the sources are read
+        saver([job("a"), job("b", company="B", posted="2020-01-01")])
+        self.assertEqual(saver.stats(), {"fetched": 2, "new": 1, "skipped_old": 1})
+
+    def test_give_back_memory_never_fails(self):
+        ingest.give_back_memory()                              # on Windows there is no malloc_trim, and that is fine
 
     def test_queueing_can_be_turned_off_and_nothing_is_run_in_the_command(self):
         self.user()

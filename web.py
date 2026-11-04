@@ -647,7 +647,8 @@ def scheduler() -> None:
     """Runs for as long as the server does. Every minute (or at once when woken): hands the worker any user marked as waiting (the
     daily fetch may have run in another process), and does whatever shared upkeep is due, one thing at a time, in the background:
     boards for titles nobody has searched yet (at once), the monthly crawl for new boards (`crawl_every_days`, default 30), and the
-    shared fetch of every posting (`fetch_every_hours`, default 0 = only when `main.py fetch` is run)."""
+    shared fetch of every posting (`fetch_every_hours`, default 0 = only when `main.py fetch` is run). After starting a crawl or fetch
+    it leaves `retry_hours` (default 1) before starting another."""
     import discovery
     import ingest
     import main as program
@@ -670,7 +671,8 @@ def scheduler() -> None:
                 try:
                     cfg = discovery.load_config(program.ROOT, conn)
                     job = ingest.next_job(conn, cfg, float(tailor.config_value("crawl_every_days", 30) or 0),
-                                          float(tailor.config_value("fetch_every_hours", 0) or 0))
+                                          float(tailor.config_value("fetch_every_hours", 0) or 0),
+                                          retry_hours=float(tailor.config_value("retry_hours", 1) or 1))
                 finally:
                     conn.close()
                 if job:

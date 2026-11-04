@@ -93,8 +93,20 @@ def platform_enabled(cfg: dict, name: str) -> bool:
     return bool((cfg.get("platforms") or {}).get(name, True))
 
 
-def collect(cfg: dict, conn=None, outcomes: list | None = None) -> list[sources.Job]:
-    """Read every source. When `outcomes` is a list, each board's result is added to it as (system, board, 'ok' | 'gone' | 'error')."""
+def _hand_on(got: list, sink) -> tuple[list, int]:
+    """(what to keep, how many there were). With a `sink`, the postings go to it at once and nothing is kept; a sink that fails is not
+    a source that failed, so it is called outside the readers' error handling."""
+    n = len(got)
+    if sink:
+        sink(got)
+        return [], n
+    return got, n
+
+
+def collect(cfg: dict, conn=None, outcomes: list | None = None, sink=None) -> list[sources.Job]:
+    """Read every source. When `outcomes` is a list, each board's result is added to it as (system, board, 'ok' | 'gone' | 'error').
+    With a `sink` (a function taking a list of postings), the company boards, Workday and the retailers hand each source's postings to
+    it as soon as they are read instead of keeping them, so memory stays small; what is returned is then only the rest (feeds, government)."""
     delay = cfg.get("request_delay", 0.4)
     src = cfg.get("sources", {})
     jobs: list[sources.Job] = []
@@ -111,35 +123,36 @@ def collect(cfg: dict, conn=None, outcomes: list | None = None) -> list[sources.
     def one(task):
         kind, fn, slug = task
         try:
-            return kind, slug, fn(slug), None
+            got, err = fn(slug), None
         except Exception as e:  # bad slug, rate limit, network: skip and keep going
-            return kind, slug, [], e
+            got, err = [], e
         finally:
             time.sleep(delay)
+        return (kind, slug, *_hand_on(got, sink), err)
 
     # The boards are small, separate lists, so several are read at once. Lines print as boards finish; jobs keep config order.
     with ThreadPoolExecutor(max_workers=max(1, int(cfg.get("fetch_workers", 8)))) as pool:
         futures = [pool.submit(one, t) for t in tasks]
         results = {}
         for fut in as_completed(futures):
-            kind, slug, got, err = results[id(fut)] = fut.result()
+            kind, slug, got, n, err = results[id(fut)] = fut.result()
             if err:
                 log(f"  {kind:10s} {slug:18s} skipped ({type(err).__name__}: {str(err)[:70]})")
             else:
-                log(f"  {kind:10s} {slug:18s} {len(got):4d} postings")
+                log(f"  {kind:10s} {slug:18s} {n:4d} postings")
         for f in futures:
-            kind, slug, got, err = results[id(f)]
+            kind, slug, got, n, err = results[id(f)]
             jobs += got
             if outcomes is not None:
                 outcomes.append((kind, slug, boards.status_of(err)))
-    jobs += collect_workday(cfg, workday, delay, outcomes)
+    jobs += collect_workday(cfg, workday, delay, outcomes, sink)
     jobs += collect_feeds(cfg, conn)
     jobs += collect_government(cfg)
-    jobs += collect_retail(cfg)
+    jobs += collect_retail(cfg, sink)
     return jobs
 
 
-def collect_retail(cfg: dict) -> list[sources.Job]:
+def collect_retail(cfg: dict, sink=None) -> list[sources.Job]:
     """Retailer career sites (Lowe's, ...), on by default; set `enabled: false` under `retailers:` in config.yaml to turn one off.
     Each is searched with the same title words as Workday plus `retail_titles` (store and warehouse jobs), since a retailer lists
     thousands of store jobs next to a few corporate roles and the search has to name the kind of job wanted."""
@@ -152,24 +165,25 @@ def collect_retail(cfg: dict) -> list[sources.Job]:
     def one(item):
         conf = conf_all.get(item[0]) or {}
         try:
-            return item, getattr(retail_sources, item[2])(conf.get("search_terms") or terms, conf.get("pages", 8), delay), None
+            got, err = getattr(retail_sources, item[2])(conf.get("search_terms") or terms, conf.get("pages", 8), delay), None
         except Exception as e:   # a site that is down or renamed must not stop the others
-            return item, [], e
+            got, err = [], e
+        return (item, *_hand_on(got, sink), err)
 
     jobs: list[sources.Job] = []
     with ThreadPoolExecutor(max_workers=max(1, len(plan))) as pool:   # different servers, so read at once; each is read one request at a time
         futures = [pool.submit(one, p) for p in plan]
         done = {}
         for fut in as_completed(futures):
-            (key, label, _), got, err = done[id(fut)] = fut.result()
+            (key, label, _), got, n, err = done[id(fut)] = fut.result()
             name = f"{key:12s} {'(' + label + ')':14s}"
-            log(f"  {name} skipped ({type(err).__name__}: {str(err)[:70]})" if err else f"  {name} {len(got):4d} postings")
+            log(f"  {name} skipped ({type(err).__name__}: {str(err)[:70]})" if err else f"  {name} {n:4d} postings")
         for f in futures:   # keep the order of the list, whatever order the sites finished in
             jobs += done[id(f)][1]
     return jobs
 
 
-def collect_workday(cfg: dict, entries: list[dict], delay: float, outcomes: list | None = None) -> list[sources.Job]:
+def collect_workday(cfg: dict, entries: list[dict], delay: float, outcomes: list | None = None, sink=None) -> list[sources.Job]:
     """Read every Workday site. Sites are different servers, so several are read at once (`workday_workers`, default 16);
     each site is still read one request at a time, with `request_delay` between requests."""
     terms, pages = filters.workday_terms(cfg), cfg.get("workday_max_pages", 3)
@@ -178,23 +192,24 @@ def collect_workday(cfg: dict, entries: list[dict], delay: float, outcomes: list
 
     def one(entry):
         try:   # an entry marked `gov: true` (a city, university, or agency) is also searched with the government titles, and `retail: true` with the retail ones
-            return entry, sources.fetch_workday(entry, gov_terms if entry.get("gov") else retail_terms if entry.get("retail") else terms, pages, delay), None
+            got, err = sources.fetch_workday(entry, gov_terms if entry.get("gov") else retail_terms if entry.get("retail") else terms, pages, delay), None
         except Exception as e:   # a site that is down or renamed must not stop the others
-            return entry, [], e
+            got, err = [], e
+        return (entry, *_hand_on(got, sink), err)
 
     jobs: list[sources.Job] = []
     with ThreadPoolExecutor(max_workers=max(1, int(cfg.get("workday_workers", 16)))) as pool:
         futures = [pool.submit(one, e) for e in entries]
         done = {}
         for fut in as_completed(futures):
-            entry, got, err = done[id(fut)] = fut.result()
+            entry, got, n, err = done[id(fut)] = fut.result()
             name = entry.get("name", entry["tenant"])
             if err:
                 log(f"  workday    {name:18s} skipped ({type(err).__name__}: {str(err)[:70]})")
             else:
-                log(f"  workday    {name:18s} {len(got):4d} postings")
+                log(f"  workday    {name:18s} {n:4d} postings")
         for f in futures:   # keep the order of the list, whatever order the sites finished in
-            entry, got, err = done[id(f)]
+            entry, got, n, err = done[id(f)]
             jobs += got
             if outcomes is not None:
                 outcomes.append(("workday", entry, boards.status_of(err)))

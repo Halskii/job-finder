@@ -255,6 +255,21 @@ class NextJobTests(Base):
         self.assertIsNone(self.job(now, fetch_hours=24))
 
 
+    def test_retry_hours_stretches_the_wait_so_a_crawl_that_never_finishes_cleanly_runs_once_a_day(self):
+        now = time.time()
+        self.user("n@example.com", {"titles": ["Registered Nurse"]})           # its titles never get marked as covered
+        db.set_meta(self.admin, "crawl_attempt", str(now - 3 * 3600))
+        self.assertEqual(ingest.next_job(self.admin, self.cfg, 30, 0, now), "crawl_new")              # the default: tried again after an hour
+        self.assertIsNone(ingest.next_job(self.admin, self.cfg, 30, 0, now, retry_hours=24))
+        self.assertEqual(ingest.next_job(self.admin, self.cfg, 30, 0, now + 22 * 3600, retry_hours=24), "crawl_new")
+        db.set_meta(self.admin, "crawl_attempt", str(now - 7200))
+        db.set_meta(self.admin, "crawl_titles", json.dumps(["software engineer", "registered nurse"]))
+        db.set_meta(self.admin, "crawl_last", str(now))
+        db.set_meta(self.admin, "fetch_attempt", str(now - 7200))
+        self.assertIsNone(ingest.next_job(self.admin, self.cfg, 30, 24, now, retry_hours=24))        # fetch_all_last is old, but a fetch was started
+        self.assertEqual(ingest.next_job(self.admin, self.cfg, 30, 24, now), "fetch")                 # the default wait of an hour would start it again
+
+
 class RunJobTests(Base):
     def test_a_crawl_that_finds_boards_is_followed_by_a_fetch_and_one_that_finds_none_is_not(self):
         with mock.patch.object(ingest, "run_crawl", return_value={"new": 3}) as crawled, mock.patch.object(ingest, "run_fetch", return_value={"fetched": 5}) as fetched, \

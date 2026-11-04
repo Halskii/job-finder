@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 import time
 
 import psycopg
@@ -48,10 +49,15 @@ def search_titles(cfg: dict, conn) -> list[str]:
     return out
 
 
-def store(conn, jobs: list, max_age_days: int = 90) -> dict:
-    """Keep these postings for everyone. A posting already stored is only marked as still listed (and given its text if it had none).
-    Postings clearly older than `max_age_days` are not kept. Returns {"fetched", "new", "skipped_old"}."""
+def _save(conn, jobs, max_age_days: int) -> int:
+    """Write these postings (see store). Rows are built and written 1000 at a time, never all at once. Returns how many were too old to keep."""
     now, rows, old = time.time(), [], 0
+
+    def flush():
+        if rows:
+            conn.executemany(STORE_SQL, rows)
+            conn.commit()
+            rows.clear()
     for j in jobs:
         if j.posted and not filters.age_ok(j.posted, max_age_days):
             old += 1
@@ -60,12 +66,52 @@ def store(conn, jobs: list, max_age_days: int = 90) -> dict:
             sources.fill_pay(j)   # an hourly rate in the text, when no yearly pay is listed
         rows.append((j.id, j.source, j.company, j.title, j.location, j.url, j.posted, j.pay_min, j.pay_max, j.pay_unit or "year",
                      j.description or "", db.dedupe_key(j.company, j.title), json.dumps(j.detail) if j.detail else None, now, now))
-    before = conn.execute("SELECT COUNT(*) AS n FROM postings").fetchone()["n"]
-    for i in range(0, len(rows), 1000):
-        conn.executemany(STORE_SQL, rows[i:i + 1000])
-        conn.commit()
-    after = conn.execute("SELECT COUNT(*) AS n FROM postings").fetchone()["n"]
-    return {"fetched": len(jobs), "new": after - before, "skipped_old": old}
+        if len(rows) >= 1000:
+            flush()
+    flush()
+    return old
+
+
+class Saver:
+    """Stores postings as the readers hand them over, one source at a time, so a fetch of every source never holds every posting in
+    memory at once (the text of a full fetch is hundreds of megabytes). Calling it with a list stores that list; `stats()` gives the
+    totals. Readers run several at once, so only one call writes at a time."""
+
+    def __init__(self, conn, max_age_days: int = 90):
+        self.conn, self.max_age, self.lock = conn, max_age_days, threading.Lock()
+        self.fetched = self.old = 0
+        self.before = conn.execute("SELECT COUNT(*) AS n FROM postings").fetchone()["n"]
+        conn.commit()      # the count must not leave a transaction open through the minutes of reading that follow
+
+    def __call__(self, jobs) -> None:
+        with self.lock:
+            self.fetched += len(jobs)
+            self.old += _save(self.conn, jobs, self.max_age)
+
+    def stats(self) -> dict:
+        after = self.conn.execute("SELECT COUNT(*) AS n FROM postings").fetchone()["n"]
+        self.conn.commit()
+        return {"fetched": self.fetched, "new": after - self.before, "skipped_old": self.old}
+
+
+def store(conn, jobs: list, max_age_days: int = 90) -> dict:
+    """Keep these postings for everyone. A posting already stored is only marked as still listed (and given its text if it had none).
+    Postings clearly older than `max_age_days` are not kept. Returns {"fetched", "new", "skipped_old"}."""
+    saver = Saver(conn, max_age_days)
+    saver(jobs)
+    return saver.stats()
+
+
+def give_back_memory() -> None:
+    """After a big fetch, hand the freed memory back to the system (Python and the C library keep it otherwise, so the process stays
+    large long after the postings are gone). Linux only; anywhere else this does nothing."""
+    import gc
+    gc.collect()
+    try:
+        import ctypes
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+    except (OSError, AttributeError):
+        pass
 
 
 def _delete(conn, ids: list) -> int:
@@ -144,7 +190,9 @@ def run_fetch(cfg: dict | None = None, connect=None, queue_users: bool = True) -
             started = time.time()
             db.set_meta(conn, "fetch_attempt", str(started))
             outcomes: list = []
-            stats = store(conn, main.collect(cfg, conn, outcomes), int(cfg.get("store_max_age_days", 90)))
+            saver = Saver(conn, int(cfg.get("store_max_age_days", 90)))
+            saver(main.collect(cfg, conn, outcomes, sink=saver))     # the big readers store as they go; what comes back is the small rest
+            stats = saver.stats()
             boards.record(conn, outcomes)
             stats["boards_removed"] = len(boards.prune(conn))   # found gone fetch after fetch: no longer worth asking
             stats["purged"] = purge(conn, int(cfg.get("keep_postings_days", 14)))
@@ -155,6 +203,7 @@ def run_fetch(cfg: dict | None = None, connect=None, queue_users: bool = True) -
         finally:
             conn.execute("SELECT pg_advisory_unlock(?)", (LOCK,))
             conn.commit()
+            give_back_memory()
     finally:
         conn.close()
 
@@ -215,11 +264,15 @@ def run_crawl(conn, cfg: dict, root, only_new: bool = False, systems=None, crawl
         conn.commit()
 
 
-def next_job(conn, cfg: dict, crawl_every_days: float, fetch_every_hours: float, now: float | None = None) -> str | None:
+def next_job(conn, cfg: dict, crawl_every_days: float, fetch_every_hours: float, now: float | None = None,
+             retry_hours: float | None = None) -> str | None:
     """What the web app should do next on its own: 'crawl_new' (someone has titles no crawl covered), 'crawl' (the monthly one), 'fetch'
-    (the daily one), or None. A crawl or fetch that was started less than an hour ago is not started again, in case it failed."""
+    (the daily one), or None. A crawl or fetch that was started less than `retry_hours` ago (default 1) is not started again, in case it
+    failed. A crawl that cannot finish cleanly never marks its titles as covered, so this is also how often 'crawl_new' (and the fetch
+    that follows it) can repeat: set it to 24 to have the web app do at most one such round a day."""
     now = time.time() if now is None else now
-    recent = lambda key: now - float(db.get_meta(conn, key) or 0) < RETRY_AFTER
+    wait = RETRY_AFTER if not retry_hours else retry_hours * 3600
+    recent = lambda key: now - float(db.get_meta(conn, key) or 0) < wait
     if not recent("crawl_attempt"):
         if uncrawled_titles(conn, cfg):
             return "crawl_new"
