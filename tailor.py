@@ -52,6 +52,25 @@ Return ONLY a JSON object, no prose, with exactly these keys ("company_name" is 
             "jobs": [{{"heading": str, "dates": str, "bullets": [str]}}],
             "education": {{"heading": str, "dates": str, "detail": str}}, "interests": str}}}}"""
 
+# How the letter is built and what goes in it, from Cornell University HR's "How to write an effective cover letter"
+# (https://jobs.hr.cornell.edu/us/en/blogarticle/how-to-write-an-effective-cover-letter), put in our own words. These are defaults:
+# the candidate's own request overrides them (see ask()), but never the rules about facts. The page layout (heading with contact details,
+# date, greeting, sign-off, left-aligned text in the resume's font, one page) is in letter_html and letter_docx.
+LETTER_GUIDE = """- The letter is 3 or 4 short paragraphs on one page, written for this one job and no other. It must be under 330 words in total, and
+  about 300 is right. Keep to these limits and count before answering: the opening at most 70 words, each body paragraph at most 90, the closing at most 50.
+- Opening paragraph: name the exact job title and the company (and the department or team if the posting names one), say the candidate is
+  applying, and add one or two sentences that connect their background to what the employer needs, so their main qualification is clear at once.
+  Do not say how the candidate found the opening unless their own request says so.
+- Body paragraphs: do not repeat the resume. Expand on the two or three most relevant achievements, responsibilities, and skills, and tie each to
+  the job. Tell the story behind each one with a specific example, in clear factual statements. Choose the examples that match what the
+  posting stresses most. Say what the candidate delivered or changed, not only what they did, and use only results the resume states.
+  Never write a bare claim such as "I am a hard worker"; show the quality through an example.
+- Say why the candidate is interested in this employer and this position, using only what the posting says about the company, its mission, and
+  the role. Do not invent anything about the employer.
+- Closing paragraph: say the candidate would welcome a conversation about next steps and thank the reader. If the posting states the
+  employer's mission or goals, connect the candidate's wish to contribute to them. Do not repeat contact details; the letterhead has them.
+- The voice is professional and personable: a warm, engaged person, not a template."""
+
 LETTER_SYSTEM = f"""You write a cover letter for one candidate applying to one job posting. Rules:
 {FACTS}
 - Keep a steady, professional tone about the whole role. Do not sound especially passionate, excited, or devoted about one
@@ -59,10 +78,8 @@ LETTER_SYSTEM = f"""You write a cover letter for one candidate applying to one j
   single one requirement out for emphasis. Show fit through specifics. Only do this if the candidate's own request asks for it.
 - Keep the cover letter focused on the candidate's strengths and how they align with the job requirements, don't just list things off their resume.
   Remember, in this role you are a human candidate with a real voice and personality, convince them you are a good fit.
-- The cover letter is 3 to 5 short paragraphs, under 330 words.
-  Say why this role at this company, give the two or three most
-  relevant examples from the resume with their specifics, written confidently. Do not repeat the whole resume. Do not write a date, address, greeting, or
-  sign-off; those are added for you. Make it flow.
+{LETTER_GUIDE}
+- Write the paragraphs only. Do not write a date, address, greeting, or sign-off; those are added for you. Make it flow.
 Return ONLY a JSON object, no prose, with exactly these keys ("company_name" is the company's name spelled the way the posting spells it):
 {{"company_name": str, "cover_letter": {{"paragraphs": [str]}}}}"""
 

@@ -710,11 +710,22 @@ def cmd_usage(args, cfg, profile, conn) -> None:
         anon.close()
 
 
+def cmd_rescore(args, cfg, profile, conn) -> None:
+    """Admin only (it is a command on the server, with no web page): score one person's jobs again with the model now in config.yaml."""
+    import rescore
+    code = rescore.run(args.user, redo_all=args.all, limit=args.limit, dry_run=args.dry_run, workers=args.workers, log=log)
+    if code:
+        sys.exit(code)
+
+
 def cmd_mark(args, cfg, profile, conn) -> None:
     if args.status not in STATUSES:
         sys.exit(f"status must be one of: {', '.join(sorted(STATUSES))}")
     n = db.set_status(conn, args.id, args.status, args.note or "")
     log(f"Updated {n} job(s).")
+
+
+NEEDS_PROFILE = ("run", "profile")   # the only commands that read profile.json; the web app keeps each person's profile in their own folder
 
 
 def main() -> None:
@@ -739,6 +750,12 @@ def main() -> None:
     l.add_argument("--min-score", type=int)
     p = sub.add_parser("profile", help="rebuild profile.json from resume.pdf (shows a diff, asks before writing)")
     p.add_argument("--apply", action="store_true", help="write the changes without asking")
+    rs = sub.add_parser("rescore", help="admin: score one person's jobs again with the model now in config.yaml (a command on the server only)")
+    rs.add_argument("--user", required=True, help="their id or their email")
+    rs.add_argument("--dry-run", action="store_true", help="only count the jobs and estimate the cost; change nothing")
+    rs.add_argument("--all", action="store_true", help="also jobs already scored with this model")
+    rs.add_argument("--limit", type=int, help="only the best-scoring N jobs this time (run it again for the next ones)")
+    rs.add_argument("--workers", type=int, help="calls made at the same time (default: scoring.workers in config.yaml)")
     m = sub.add_parser("mark", help="update a job's status in the tracker")
     m.add_argument("id", help="job id or any unique fragment of it")
     m.add_argument("status")
@@ -764,7 +781,7 @@ def main() -> None:
 
     if not (ROOT / "config.yaml").exists():
         sys.exit("config.yaml not found. Copy config.example.yaml to config.yaml, then edit it (see the README).")
-    if args.cmd not in ("fetch", "invite", "usage") and not (ROOT / "profile.json").exists():   # the shared fetch is nobody's own
+    if args.cmd in NEEDS_PROFILE and not (ROOT / "profile.json").exists():
         sys.exit("profile.json not found. Copy profile.example.json to profile.json and fill in the facts a resume can't "
                  "show (citizenship, clearance, do_not_assume), then run: python main.py profile")
     load_env()
@@ -774,7 +791,7 @@ def main() -> None:
     # Every command takes the same four arguments, even those that ignore some of them.
     {"run": cmd_run, "list": cmd_list, "mark": cmd_mark, "profile": cmd_profile,
      "discover": cmd_discover, "workday-add": cmd_workday_add, "crawl": cmd_crawl, "reformat": cmd_reformat,
-     "fetch": cmd_fetch, "invite": cmd_invite, "usage": cmd_usage}[args.cmd](args, cfg, profile, conn)
+     "fetch": cmd_fetch, "invite": cmd_invite, "usage": cmd_usage, "rescore": cmd_rescore}[args.cmd](args, cfg, profile, conn)
 
 
 if __name__ == "__main__":

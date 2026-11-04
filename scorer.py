@@ -72,6 +72,7 @@ def score_job(client, model: str, profile: dict, job, min_pay: int, resume_text:
     usage = getattr(msg, "usage", None)
     data["_in"] = int(getattr(usage, "input_tokens", 0) or 0)
     data["_out"] = int(getattr(usage, "output_tokens", 0) or 0)
+    data["_model"] = model    # which model gave this score, so a later rescore can tell the jobs it has already done
     # Keep the answer usable even if the model strays from the format.
     data["fit_score"] = max(0, min(100, int(data.get("fit_score", 0))))
     if data.get("verdict") not in ("apply", "maybe", "skip"):
