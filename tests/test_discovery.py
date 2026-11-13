@@ -348,6 +348,42 @@ class CommandTests(unittest.TestCase):
             chk.assert_not_called()
         self.assertEqual(boards.load(self.conn), {})
 
+    def bulk(self, text, check):
+        path = self.root / "sites.txt"
+        path.write_text(text, encoding="utf-8")
+        with mock.patch.object(discovery, "check_workday", side_effect=check), mock.patch.object(main.time, "sleep"):
+            main.cmd_workday_add(argparse.Namespace(url=None, name=None, file=str(path)), self.cfg, {}, self.conn)
+
+    def test_workday_add_reads_many_sites_from_a_file_and_one_bad_line_does_not_stop_the_rest(self):
+        def check(entry):
+            if entry["tenant"] == "broken":
+                raise RuntimeError("422")
+            return 10
+        self.bulk("# my sites\nAcme Corp | https://acme.wd1.myworkdayjobs.com/en-US/Acme_Careers/job/x\n\n"
+                  "https://broken.wd5.myworkdayjobs.com/Jobs\nnot a url\n  https://beta.wd5.myworkdayjobs.com/en-US/Beta  \n", check)
+        saved = boards.load(self.conn)["workday"]
+        self.assertEqual([(e["name"], e["site"]) for e in saved], [("Acme Corp", "Acme_Careers"), ("Beta", "Beta")])
+
+    def test_workday_add_skips_a_site_it_already_has_without_asking_it_again(self):
+        url = "https://acme.wd1.myworkdayjobs.com/en-US/Acme_Careers"
+        with mock.patch.object(discovery, "check_workday", return_value=5):
+            main.cmd_workday_add(argparse.Namespace(url=url, name="Acme"), self.cfg, {}, self.conn)
+        self.bulk(f"Acme Again | {url}\n", check=AssertionError("asked a site that is already saved"))
+        self.assertEqual([e["name"] for e in boards.load(self.conn)["workday"]], ["Acme"])
+
+    def test_workday_add_marks_every_site_in_a_file(self):
+        path = self.root / "sites.txt"
+        path.write_text("https://a.wd1.myworkdayjobs.com/A\nhttps://b.wd1.myworkdayjobs.com/B\n", encoding="utf-8")
+        with mock.patch.object(discovery, "check_workday", return_value=1), mock.patch.object(main.time, "sleep"):
+            main.cmd_workday_add(argparse.Namespace(url=None, name=None, file=str(path), retail=True), self.cfg, {}, self.conn)
+        self.assertTrue(all(e.get("retail") for e in boards.load(self.conn)["workday"]))
+
+    def test_workday_add_with_nothing_to_add_says_how_to_use_it(self):
+        with mock.patch.object(discovery, "check_workday") as chk:
+            main.cmd_workday_add(argparse.Namespace(url=None, name=None, file=None), self.cfg, {}, self.conn)
+            chk.assert_not_called()
+        self.assertEqual(boards.load(self.conn), {})
+
 
 if __name__ == "__main__":
     unittest.main()

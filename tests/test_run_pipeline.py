@@ -335,6 +335,17 @@ class PlatformSwitchTests(unittest.TestCase):
             jobs = main.collect(cfg, None)
         return jobs, calls, out.getvalue()
 
+    def test_with_a_sink_boards_and_workday_are_handed_over_as_read_and_nothing_is_kept(self):
+        handed = []
+
+        def fetcher(kind):
+            return lambda *a, **k: [job(f"{kind}:1", company=kind)]
+        with mock.patch.object(sources, "fetch_greenhouse", fetcher("gh")), mock.patch.object(sources, "fetch_lever", fetcher("lv")), \
+                mock.patch.object(sources, "fetch_workday", fetcher("wd")), redirect_stdout(io.StringIO()):
+            kept = main.collect(self.CFG, None, sink=handed.append)
+        self.assertEqual(kept, [])
+        self.assertEqual(sorted(j.id for batch in handed for j in batch), ["gh:1", "lv:1", "wd:1"])
+
     def test_everything_is_on_when_the_section_is_missing_or_a_platform_is_not_listed(self):
         for platforms in (None, {}, {"ashby": False}):
             jobs, calls, _ = self.collect(platforms)

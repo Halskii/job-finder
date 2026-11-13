@@ -32,6 +32,10 @@ JIBE_SITES = {
     "heb": ("H-E-B", "https://careers.heb.com", "/jobs/{}"),                                # also Central Market and Joe V's Smart Shop (`brand`)
     "footlocker": ("Foot Locker", "https://careers.footlocker.com", "/jobs/{}"),
     "sheetz": ("Sheetz", "https://jobs.sheetz.com", "/jobs/{}"),
+    # Not retailers: large employers on the same Jibe career site (checked: robots.txt allows the search and asks for crawl-delay 5).
+    "amd": ("AMD", "https://careers.amd.com", "/careers-home/jobs/{}"),
+    "statefarm": ("State Farm", "https://jobs.statefarm.com", "/main/jobs/{}"),
+    "garmin": ("Garmin", "https://careers.garmin.com", "/jobs/{}"),
 }
 
 

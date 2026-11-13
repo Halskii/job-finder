@@ -8,7 +8,7 @@ PATS = filters.compile_exclusions(["California", "CA", "San Francisco", "SF", "B
 
 class ExclusionTests(unittest.TestCase):
     def test_dropped_when_every_location_excluded(self):
-        for loc in ["San Francisco, CA", "Los Angeles, California", "SF Bay Area", "US-SF", "Remote, CA",
+        for loc in ["San Francisco, CA", "Los Angeles, California", "SF Bay Area", "US-SF", "Hybrid - San Francisco, CA",
                     "San Francisco, CA | Los Angeles, CA", "South San Francisco, CA"]:
             self.assertFalse(filters.exclusion_ok(loc, PATS), loc)
 
@@ -24,6 +24,19 @@ class ExclusionTests(unittest.TestCase):
 
     def test_state_code_is_case_sensitive(self):
         self.assertTrue(filters.exclusion_ok("Remote, ca", PATS))      # lowercase 'ca' is not the state code
+
+    def test_remote_work_is_kept_whatever_state_it_names(self):
+        for loc in ["Remote - California", "Remote, CA", "Remote-California", "California (Remote)", "US-Remote", "Remote - San Francisco",
+                    "Remote - CA | San Francisco, CA"]:
+            self.assertTrue(filters.exclusion_ok(loc, PATS), loc)
+        self.assertFalse(filters.exclusion_ok("San Francisco, CA (Hybrid)", PATS))     # the same places without "remote" are still dropped
+
+    def test_an_exclusion_that_says_remote_still_drops_remote_work(self):
+        pats = filters.compile_exclusions(["California", "Remote - Canada"])
+        self.assertFalse(filters.exclusion_ok("Remote - Canada", pats))
+        self.assertTrue(filters.exclusion_ok("Remote - California", pats))
+        self.assertTrue(filters.exclusion_ok("Remote - US", pats))
+        self.assertTrue(filters.exclusion_ok("Remote - Canada | Austin, TX", pats))      # another location is still open
 
     def test_empty_inputs(self):
         self.assertTrue(filters.exclusion_ok("", PATS))

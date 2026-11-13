@@ -242,6 +242,23 @@ class Collecting(unittest.TestCase):
         self.assertEqual(self.calls["cvs"], [(["software engineer", "devops engineer"], 8)])
         self.assertTrue(any("lowes" in c[0][0] and "1 postings" in c[0][0] for c in self.log.call_args_list))
 
+    def test_with_a_sink_each_retailers_postings_are_handed_over_and_not_kept(self):
+        self.found["lowes"] = [fake_jobs()]
+        self.found["cvs"] = [fake_jobs(), fake_jobs()]
+        handed = []
+        kept = main.collect_retail(self.CFG, sink=handed.append)
+        self.assertEqual(kept, [])
+        self.assertEqual(sorted(len(h) for h in handed if h), [1, 2])             # one list per retailer that found anything
+        self.assertTrue(any("cvs" in c[0][0] and "2 postings" in c[0][0] for c in self.log.call_args_list))     # the log still says how many
+
+    def test_a_sink_that_fails_stops_the_fetch_and_is_not_taken_for_a_site_that_failed(self):
+        self.found["lowes"] = [fake_jobs()]
+
+        def broken(jobs):
+            raise RuntimeError("database is gone")
+        with self.assertRaisesRegex(RuntimeError, "database is gone"):
+            main.collect_retail(self.CFG, sink=broken)
+
     def test_retail_titles_are_searched_too_but_not_twice(self):
         main.collect_retail({**self.CFG, "retail_titles": ["Cashier", "Store Manager II", "DevOps Engineer"]})
         self.assertEqual(self.calls["lowes"][0][0], ["software engineer", "devops engineer", "cashier", "store manager"])

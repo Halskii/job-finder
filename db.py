@@ -50,6 +50,8 @@ CREATE TABLE IF NOT EXISTS postings (
 CREATE INDEX IF NOT EXISTS postings_dedupe ON postings (dedupe_key);
 ALTER TABLE postings ADD COLUMN IF NOT EXISTS detail TEXT;                              -- JSON: what a source needs to read the full posting later
 ALTER TABLE postings ADD COLUMN IF NOT EXISTS detail_tries INTEGER NOT NULL DEFAULT 0;  -- failed attempts to read it; after a few it is left alone
+ALTER TABLE postings ADD COLUMN IF NOT EXISTS closed_at DOUBLE PRECISION;   -- when its employer's site was found to have taken it down (see liveness.py); NULL = not known to be
+ALTER TABLE postings ADD COLUMN IF NOT EXISTS checked_at DOUBLE PRECISION;  -- when it was last asked about, whatever the answer
 CREATE INDEX IF NOT EXISTS postings_last_seen ON postings (last_seen);
 CREATE INDEX IF NOT EXISTS postings_fetched ON postings (fetched_at);
 
@@ -59,6 +61,15 @@ CREATE TABLE IF NOT EXISTS user_jobs (
   quick_score DOUBLE PRECISION, score INTEGER, verdict TEXT, analysis TEXT,
   status TEXT NOT NULL DEFAULT 'new', first_seen DOUBLE PRECISION, notes TEXT, applied_at TEXT,
   PRIMARY KEY (user_id, job_id)
+);
+-- Every model's score for a job, kept side by side. user_jobs.score, verdict and analysis hold the score of the model the user has chosen
+-- to look at (user_runs.model), so everything that reads the `jobs` view shows that model's answer; switching models copies the chosen
+-- model's scores into those three columns (see set_active_model).
+CREATE TABLE IF NOT EXISTS job_scores (
+  user_id BIGINT NOT NULL, job_id TEXT NOT NULL, model TEXT NOT NULL,
+  score INTEGER, verdict TEXT, analysis TEXT, scored_at DOUBLE PRECISION,
+  PRIMARY KEY (user_id, job_id, model),
+  FOREIGN KEY (user_id, job_id) REFERENCES user_jobs (user_id, job_id) ON DELETE CASCADE
 );
 CREATE TABLE IF NOT EXISTS interview_rounds (
   id BIGSERIAL PRIMARY KEY, user_id BIGINT NOT NULL, job_id TEXT NOT NULL, kind TEXT NOT NULL, round_date TEXT,
@@ -83,6 +94,13 @@ CREATE TABLE IF NOT EXISTS boards (
   added DOUBLE PRECISION NOT NULL, fails INTEGER NOT NULL DEFAULT 0, last_ok DOUBLE PRECISION, origin TEXT NOT NULL DEFAULT 'crawl',
   PRIMARY KEY (system, ident)
 );
+-- Wages from the Bureau of Labor Statistics wage survey (OEWS), shared by everyone and kept for a year: for one occupation in one place
+-- (area_type M metro, S state or N nation), the annual wage at the 10th, 25th, 50th, 75th and 90th percentile (NULL where the survey has none).
+CREATE TABLE IF NOT EXISTS bls_wages (
+  occupation TEXT NOT NULL, area_type TEXT NOT NULL, area TEXT NOT NULL, year INTEGER,
+  p10 INTEGER, p25 INTEGER, p50 INTEGER, p75 INTEGER, p90 INTEGER, fetched DOUBLE PRECISION NOT NULL,
+  PRIMARY KEY (occupation, area_type, area)
+);
 -- Where each user's matching and scoring has got to. Only counters and a state word, so it has no row-level security: the background
 -- worker has to see every user's row to pick up unfinished work, and the web app always filters by the signed-in user.
 CREATE TABLE IF NOT EXISTS user_runs (
@@ -96,6 +114,8 @@ CREATE TABLE IF NOT EXISTS user_runs (
   watermark DOUBLE PRECISION,                    -- postings fetched after this have not been checked yet
   updated DOUBLE PRECISION NOT NULL DEFAULT 0
 );
+ALTER TABLE user_runs ADD COLUMN IF NOT EXISTS score_limit INTEGER;   -- score at most this many in the run that is queued or going (NULL = no cap)
+ALTER TABLE user_runs ADD COLUMN IF NOT EXISTS model TEXT;   -- the model whose scores this user is looking at; NULL = the one in config.yaml
 -- What each user's paid calls add up to, per day and kind of call (scoring, ...), for limits and for knowing what a user costs.
 CREATE TABLE IF NOT EXISTS usage (
   user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE, day TEXT NOT NULL, kind TEXT NOT NULL,
@@ -106,7 +126,8 @@ CREATE TABLE IF NOT EXISTS usage (
 CREATE OR REPLACE VIEW jobs WITH (security_invoker = true) AS
   SELECT p.id, p.source, p.company, p.title, p.location, p.url, p.posted, p.pay_min, p.pay_max, p.pay_unit,
          p.description, p.formatted, p.dedupe_key,
-         u.quick_score, u.score, u.verdict, u.analysis, u.status, u.first_seen, u.notes, u.applied_at
+         u.quick_score, u.score, u.verdict, u.analysis, u.status, u.first_seen, u.notes, u.applied_at,
+         p.closed_at, p.checked_at
   FROM postings p JOIN user_jobs u ON u.job_id = p.id;
 
 CREATE OR REPLACE FUNCTION jobs_update() RETURNS trigger LANGUAGE plpgsql AS $$
@@ -130,7 +151,7 @@ CREATE TRIGGER jobs_update INSTEAD OF UPDATE ON jobs FOR EACH ROW EXECUTE FUNCTI
 """
 
 # Tables a user owns. Each gets a policy that only lets a connection see and write the rows of the user it was opened for.
-PRIVATE_TABLES = ("user_jobs", "interview_rounds", "interview_tips", "usage")
+PRIVATE_TABLES = ("user_jobs", "job_scores", "interview_rounds", "interview_tips", "usage")
 _OWN_ROWS = "user_id = nullif(current_setting('app.user_id', true), '')::bigint"
 
 
@@ -288,7 +309,7 @@ def add_job(conn, job, quick: float) -> bool:
     conn.execute(
         "INSERT INTO postings (id, source, company, title, location, url, posted, pay_min, pay_max, description,"
         " dedupe_key, formatted, pay_unit, fetched_at, last_seen) VALUES (?,?,?,?,?,?,?,?,?,?,?,1,?,?,?)"
-        " ON CONFLICT (id) DO UPDATE SET last_seen = excluded.last_seen",
+        " ON CONFLICT (id) DO UPDATE SET last_seen = excluded.last_seen, closed_at = NULL",
         (job.id, job.source, job.company, job.title, job.location, job.url, job.posted, job.pay_min, job.pay_max,
          job.description, dedupe_key(job.company, job.title), job.pay_unit, now, now))
     cur = conn.execute("INSERT INTO user_jobs (user_id, job_id, quick_score, first_seen) VALUES (?,?,?,?) ON CONFLICT DO NOTHING",
@@ -300,21 +321,91 @@ def add_job(conn, job, quick: float) -> bool:
 def unscored(conn, limit: int):
     """Jobs not yet scored, best keyword match first, so a limited number of API calls goes to the likeliest fits."""
     return conn.execute(
-        "SELECT * FROM jobs WHERE score IS NULL AND status='new' ORDER BY quick_score DESC NULLS LAST LIMIT ?", (limit,)
+        "SELECT * FROM jobs WHERE score IS NULL AND status='new' AND closed_at IS NULL ORDER BY quick_score DESC NULLS LAST LIMIT ?", (limit,)
     ).fetchall()
 
 
-def save_score(conn, job_id: str, score: int, verdict: str, analysis: dict) -> None:
-    """Record the model's answer; the full analysis is kept as JSON for the report and viewer."""
-    conn.execute("UPDATE user_jobs SET score=?, verdict=?, analysis=? WHERE job_id=?",
-                 (score, verdict, json.dumps(analysis), job_id))
+def default_model() -> str:
+    """The scoring model in config.yaml: the one a user looks at until they choose another."""
+    import pipeline
+    return pipeline.scoring_config()["model"]
+
+
+def active_model(conn) -> str:
+    """The model whose scores this user is looking at."""
+    row = conn.execute("SELECT model FROM user_runs WHERE user_id = ?", (conn.user_id,)).fetchone()
+    return (row["model"] if row else None) or default_model()
+
+
+def save_score(conn, job_id: str, score: int, verdict: str, analysis: dict, model: str | None = None) -> None:
+    """Record the model's answer; the full analysis is kept as JSON for the report and viewer. The answer is kept under the model that gave
+    it (`model`, else the `_model` in the analysis, else the model the user is looking at) and also shown, when that is the model the
+    user is looking at: a score from another model is stored but does not replace what they see."""
+    default = default_model()
+    model = model or (analysis or {}).get("_model") or active_model(conn)
+    text = json.dumps(analysis)
+    shown = conn.execute("SELECT score, verdict, analysis FROM user_jobs WHERE user_id = ? AND job_id = ?", (conn.user_id, job_id)).fetchone()
+    if shown and shown["score"] is not None:        # the score this job has now is filed under its own model before a new one can replace it
+        try:
+            earlier = (json.loads(shown["analysis"] or "{}") or {}).get("_model")
+        except (TypeError, ValueError, AttributeError):
+            earlier = None
+        conn.execute("INSERT INTO job_scores (user_id, job_id, model, score, verdict, analysis, scored_at) VALUES (?,?,?,?,?,?,?)"
+                     " ON CONFLICT (user_id, job_id, model) DO NOTHING",
+                     (conn.user_id, job_id, earlier or active_model(conn), shown["score"], shown["verdict"], shown["analysis"], time.time()))
+    conn.execute("INSERT INTO job_scores (user_id, job_id, model, score, verdict, analysis, scored_at) VALUES (?,?,?,?,?,?,?)"
+                 " ON CONFLICT (user_id, job_id, model) DO UPDATE SET score = excluded.score, verdict = excluded.verdict,"
+                 " analysis = excluded.analysis, scored_at = excluded.scored_at",
+                 (conn.user_id, job_id, model, score, verdict, text, time.time()))
+    conn.execute("UPDATE user_jobs SET score=?, verdict=?, analysis=? WHERE user_id=? AND job_id=?"
+                 " AND ? = COALESCE((SELECT model FROM user_runs WHERE user_id = ?), ?)",     # decided here, so a switch mid-run is respected
+                 (score, verdict, text, conn.user_id, job_id, model, conn.user_id, default))
     conn.commit()
 
 
+def keep_shown_scores(conn) -> None:
+    """File the scores in user_jobs under the model that gave them (an analysis says which; an older one does not, so it is the model the
+    user is looking at), so that none is lost when the user looks at another model's."""
+    shown = active_model(conn)
+    rows = conn.execute("SELECT job_id, score, verdict, analysis FROM user_jobs WHERE score IS NOT NULL").fetchall()
+    now = time.time()
+    for r in rows:
+        try:
+            made_by = (json.loads(r["analysis"] or "{}") or {}).get("_model")
+        except (TypeError, ValueError, AttributeError):
+            made_by = None
+        conn.execute("INSERT INTO job_scores (user_id, job_id, model, score, verdict, analysis, scored_at) VALUES (?,?,?,?,?,?,?)"
+                     " ON CONFLICT (user_id, job_id, model) DO NOTHING",
+                     (conn.user_id, r["job_id"], made_by or shown, r["score"], r["verdict"], r["analysis"], now))
+
+
+def set_active_model(conn, model: str) -> None:
+    """Show this user the scores of `model`: every job they have gets that model's score, or none where it has not scored it."""
+    keep_shown_scores(conn)
+    conn.execute("INSERT INTO user_runs (user_id, model, updated) VALUES (?, ?, ?)"
+                 " ON CONFLICT (user_id) DO UPDATE SET model = excluded.model", (conn.user_id, model, time.time()))
+    conn.execute("UPDATE user_jobs SET score = s.score, verdict = s.verdict, analysis = s.analysis FROM job_scores s"
+                 " WHERE s.user_id = user_jobs.user_id AND s.job_id = user_jobs.job_id AND s.model = ?", (model,))
+    conn.execute("UPDATE user_jobs SET score = NULL, verdict = NULL, analysis = NULL WHERE NOT EXISTS ("
+                 "SELECT 1 FROM job_scores s WHERE s.user_id = user_jobs.user_id AND s.job_id = user_jobs.job_id AND s.model = ?)"
+                 " AND score IS NOT NULL", (model,))
+    conn.commit()
+
+
+def model_counts(conn) -> dict:
+    """{model: how many of this user's jobs it has scored}, for the model they are looking at as well as the others."""
+    counts = {r["model"]: r["n"] for r in conn.execute("SELECT model, COUNT(*) AS n FROM job_scores WHERE score IS NOT NULL GROUP BY model").fetchall()}
+    shown = active_model(conn)      # scores from before several models were kept are only in user_jobs until the user first switches
+    held = conn.execute("SELECT COUNT(*) AS n FROM user_jobs WHERE score IS NOT NULL").fetchone()["n"]
+    counts[shown] = max(counts.get(shown, 0), held)
+    return counts
+
+
 def top(conn, n: int, min_score: int):
-    """Best scored jobs still open to you (new or saved, not applied or skipped), highest score first."""
+    """Best scored jobs still open to you (new or saved, not applied or skipped), highest score first. A posting its employer has taken down
+    (see liveness.py) is not one."""
     return conn.execute(
-        "SELECT * FROM jobs WHERE score IS NOT NULL AND score>=? AND status IN ('new','saved')"
+        "SELECT * FROM jobs WHERE score IS NOT NULL AND score>=? AND status IN ('new','saved') AND closed_at IS NULL"
         " ORDER BY score DESC, quick_score DESC NULLS LAST LIMIT ?", (min_score, n)
     ).fetchall()
 
@@ -481,7 +572,3 @@ def usage_total_today(conn, kind: str) -> int:
     """How many paid calls of this kind everyone together has made today."""
     row = conn.execute("SELECT calls FROM usage_totals WHERE day = ? AND kind = ?", (date.today().isoformat(), kind)).fetchone()
     return row["calls"] if row else 0
-
-
-def unscored_count(conn) -> int:
-    return conn.execute("SELECT COUNT(*) AS n FROM jobs WHERE score IS NULL AND status = 'new'").fetchone()["n"]

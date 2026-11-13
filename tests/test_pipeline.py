@@ -46,6 +46,8 @@ class Base(unittest.TestCase):
         self.patches.append(mock.patch.object(pipeline, "connect_as", lambda uid: pgtest.connect(self.schema, user=uid)))
         self.scfg = {"model": "m", "initial_batch": 3, "batch_size": 2, "max_per_user_per_day": 100, "workers": 1}
         self.patches.append(mock.patch.object(pipeline, "scoring_config", lambda: self.scfg))
+        real_config = tailor.config_value      # the limits are the built-in defaults whatever the config.yaml of whoever runs the tests says (it may say unlimited)
+        self.patches.append(mock.patch.object(tailor, "config_value", lambda key, default=None: {} if key == "limits" else real_config(key, default)))
         for p in self.patches:
             p.start()
         self.anon = pgtest.connect(self.schema, user=False)

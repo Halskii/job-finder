@@ -60,7 +60,12 @@ class RescoreBase(Base):
         try:
             db.add_job(conn, sources.Job(jid, "greenhouse", "Acme", title or f"Engineer {jid}", "Austin, TX", "https://x/" + jid, posted=RECENT,
                                          description=description), 0.0)
-            db.save_score(conn, jid, score, verdict, {"fit_score": score, "verdict": verdict, "_in": 4000, "_out": 500, **({"_model": model} if model else {})})
+            analysis = {"fit_score": score, "verdict": verdict, "_in": 4000, "_out": 500, **({"_model": model} if model else {})}
+            if model and model != NEW:       # a score made before the model changed: it is what the person still sees, as it was saved then
+                conn.execute("UPDATE user_jobs SET score = ?, verdict = ?, analysis = ? WHERE job_id = ?", (score, verdict, json.dumps(analysis), jid))
+                conn.commit()
+            else:
+                db.save_score(conn, jid, score, verdict, analysis)
             if status != "new":
                 db.set_status_exact(conn, jid, status)
         finally:

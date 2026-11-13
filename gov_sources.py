@@ -955,7 +955,6 @@ def fetch_kentucky(search_terms=None, pages: int = 10, delay: float = 0.4) -> li
 # ----------------------------------------------------------------------------- South Dakota (HireClick)
 SD_BOARD = "https://statesdgovt.hireclick.com"
 SD_ORG = "16343DEB-35A1-4A0B-9922-A7FC866656E9"   # the state's number on the board, from its page
-SD_DELAY = 10   # robots.txt: Crawl-delay 10
 
 
 def parse_south_dakota_results(data) -> list[Job]:

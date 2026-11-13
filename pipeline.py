@@ -13,6 +13,7 @@ import hashlib
 import json
 import logging
 import queue
+import re
 import threading
 import time
 from concurrent.futures import CancelledError, ThreadPoolExecutor, as_completed
@@ -41,6 +42,27 @@ def _connect(uid):
 
 def scoring_config() -> dict:
     return {**DEFAULTS, **(tailor.config_value("scoring", {}) or {})}
+
+
+MODEL_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{1,80}")
+
+
+def allowed_models() -> list[str]:
+    """The models a user may choose to score with: `scoring.models` in config.yaml, always with the default model first. With none listed
+    there is no choice, and the page shows no model menu."""
+    scfg = scoring_config()
+    listed = scfg.get("models") or []
+    out = [scfg["model"]]
+    for m in listed if isinstance(listed, list) else []:
+        if isinstance(m, str) and MODEL_NAME.fullmatch(m.strip()) and m.strip() not in out:
+            out.append(m.strip())
+    return out
+
+
+def model_label(model: str) -> str:
+    """'claude-haiku-5-5' as 'Haiku 5.5'; a name in another shape is shown as it is."""
+    m = re.fullmatch(r"claude-([a-z]+)-(\d+)-(\d+)", model)
+    return f"{m.group(1).capitalize()} {m.group(2)}.{m.group(3)}" if m else model
 
 
 # ---------------------------------------------------------------- the user's search
@@ -73,7 +95,7 @@ def settings_key(settings: dict) -> str:
 
 def _save(conn, **fields) -> None:
     """Record this user's progress."""
-    allowed = {"state", "message", "matched", "waiting", "scored", "settings_key", "watermark"}
+    allowed = {"state", "message", "matched", "waiting", "scored", "settings_key", "watermark", "score_limit"}
     assert set(fields) <= allowed, set(fields) - allowed
     cols = list(fields)
     conn.execute(f"INSERT INTO user_runs (user_id, {', '.join(cols)}, updated) VALUES (?, {', '.join('?' * len(cols))}, ?)"
@@ -86,7 +108,7 @@ def status(conn) -> dict:
     """What the page shows: the state of this user's run and how much scoring is left today."""
     row = conn.execute("SELECT state, message, matched, waiting, scored, updated FROM user_runs WHERE user_id = ?", (conn.user_id,)).fetchone()
     out = dict(row) if row else {"state": "idle", "message": "", "matched": 0, "waiting": 0, "scored": 0, "updated": 0}
-    out["left_today"] = max(0, scoring_config()["max_per_user_per_day"] - db.usage_today(conn, "score"))
+    out["left_today"] = limits.UNLIMITED if limits.unlimited() else max(0, scoring_config()["max_per_user_per_day"] - db.usage_today(conn, "score"))
     return out
 
 
@@ -101,7 +123,8 @@ def match(conn, rules: Rules, profile: dict, since: float | None = None, read_mi
     location and pay. Returns (how many were added, how many could not be read this time and must be looked at again)."""
     sql = ("SELECT id, source, company, title, location, posted, pay_min, pay_max, pay_unit, COALESCE(description, '') <> '' AS has_text,"
            " detail IS NOT NULL AND detail_tries < ? AS can_read FROM postings p"
-           " WHERE NOT EXISTS (SELECT 1 FROM user_jobs u WHERE u.job_id = p.id AND u.user_id = ?)")
+           " WHERE p.source <> 'manual'"      # a job somebody pasted in by hand (manualjob.py) belongs to that person alone
+           " AND NOT EXISTS (SELECT 1 FROM user_jobs u WHERE u.job_id = p.id AND u.user_id = ?)")
     args: list = [ingest.MAX_DETAIL_TRIES, conn.user_id]
     if since is not None:
         sql, args = sql + " AND p.fetched_at > ?", args + [since]
@@ -134,11 +157,46 @@ def match(conn, rules: Rules, profile: dict, since: float | None = None, read_mi
 def pending(conn, rules: Rules, skip: set) -> list:
     """The ids of this user's unscored jobs that still fit their search, best keyword match first."""
     rows = conn.execute("SELECT id, location, title, posted, pay_min, pay_max, pay_unit, description IS NOT NULL AND description <> '' AS has_text"
-                        " FROM jobs WHERE score IS NULL AND status = 'new' ORDER BY quick_score DESC NULLS LAST").fetchall()
+                        " FROM jobs WHERE score IS NULL AND status IN ('new', 'saved') AND closed_at IS NULL"
+                        # what another model made of a job comes first (so that the best ones are read first when a new model is chosen), then the keyword match
+                        " ORDER BY COALESCE((SELECT MAX(s.score) FROM job_scores s WHERE s.job_id = jobs.id), -1) DESC, quick_score DESC NULLS LAST").fetchall()
     return [r["id"] for r in rows if r["id"] not in skip and r["has_text"] and rules.fits(r)]
 
 
 # ---------------------------------------------------------------- scoring
+
+def score_one(uid: int, job_id: str, client=None) -> dict:
+    """Score one job of this user's now, as a job they added by hand needs: it is not in any run's queue. {"scored": True} when done, or
+    {"scored": False, "reason": words for the person} when it cannot be scored right now (no profile, the day's limit, no key, a
+    failed call); the job is kept either way. LookupError when the user has no such job."""
+    conn = _connect(uid)
+    try:
+        row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
+        if row is None:
+            raise LookupError(job_id)
+        settings, profile = userdata.load_settings(uid), userdata.load_profile(uid)
+        if profile is None:
+            return {"scored": False, "reason": "Add your profile first, then this job can be scored."}
+        scfg = scoring_config()
+        if limits.paused():
+            return {"scored": False, "reason": limits.PAUSED}
+        if limits.scoring_left(conn, scfg["max_per_user_per_day"]) <= 0:
+            return {"scored": False, "reason": "Today's scoring limit is reached. The job is saved; it can be scored tomorrow."}
+        try:
+            client = client or tailor.make_client()
+        except UserError as ex:
+            return {"scored": False, "reason": ex.message}
+        import main
+        try:
+            res = scorer.score_job(client, db.active_model(conn), profile, row, settings["min_pay"], main.load_resume(userdata.home(uid)))
+        except Exception as ex:
+            return {"scored": False, "reason": explain(ex)[0]}
+        db.save_score(conn, job_id, res["fit_score"], res["verdict"], res)
+        db.add_usage(conn, "score", 1, res.get("_in", 0), res.get("_out", 0))
+        return {"scored": True}
+    finally:
+        conn.close()
+
 
 def score_batches(conn, rules: Rules, profile: dict, settings: dict, scfg: dict, client, resume_text: str, first: bool = True,
                   only_first: bool = False, skip: set | None = None) -> str:
@@ -146,25 +204,30 @@ def score_batches(conn, rules: Rules, profile: dict, settings: dict, scfg: dict,
     day's limit is reached, or a failure that would repeat for every call (no key, no credit). With only_first, stops after the first
     batch. Returns 'complete', 'limit', 'error', or 'more' (stopped after the first batch with jobs still waiting)."""
     skip = skip if skip is not None else set()   # jobs that failed: not tried again, even in a later call of this run
-    row = conn.execute("SELECT scored FROM user_runs WHERE user_id = ?", (conn.user_id,)).fetchone()
+    row = conn.execute("SELECT scored, score_limit FROM user_runs WHERE user_id = ?", (conn.user_id,)).fetchone()
     scored = row["scored"] if row else 0
+    cap = row["score_limit"] if row else None      # the person asked for only this many to be scored in this run
     while True:
         if limits.paused():
             return "paused"
-        left = min(scfg["max_per_user_per_day"] - db.usage_today(conn, "score"), limits.everyone_left(conn, "score"))   # this person's limit, and the whole site's
+        left = limits.scoring_left(conn, scfg["max_per_user_per_day"])   # this person's limit, and the whole site's (none when limits are off)
+        capped = cap is not None and cap - scored <= 0
+        if cap is not None:
+            left = min(left, max(0, cap - scored))
         todo_ids = pending(conn, rules, skip)
         _save(conn, waiting=len(todo_ids), scored=scored)
         if not todo_ids:
             return "complete"
         if left <= 0:
-            return "limit"
+            return "cap" if capped else "limit"
         batch = todo_ids[:min(scfg["initial_batch"] if first else scfg["batch_size"], left)]
         first = False
+        model = db.active_model(conn)      # the one the person is looking at, which may have been changed since the run began
         rows = {r["id"]: r for r in conn.execute("SELECT * FROM jobs WHERE id = ANY(?)", (batch,)).fetchall()}
         ok = tok_in = tok_out = 0
         fatal = None
         with ThreadPoolExecutor(max_workers=max(1, int(scfg["workers"]))) as pool:
-            futures = {pool.submit(scorer.score_job, client, scfg["model"], profile, rows[i], settings["min_pay"], resume_text): i
+            futures = {pool.submit(scorer.score_job, client, model, profile, rows[i], settings["min_pay"], resume_text): i
                        for i in batch}
             for fut in as_completed(futures):
                 job_id = futures[fut]
@@ -235,11 +298,27 @@ def run_user(uid: int, client=None) -> dict:
             _save(conn, state="done", message=f"Today's scoring limit is reached. The other {waiting} matches are scored tomorrow.", waiting=waiting)
         elif outcome == "paused":
             _save(conn, state="done", message=limits.PAUSED + " Your matches are scored when it resumes.", waiting=len(pending(conn, rules, skip)))
+        elif outcome == "cap":       # the number the person asked for is done; the rest wait until they ask for more
+            _save(conn, state="done", message="", waiting=len(pending(conn, rules, skip)))
         elif outcome != "error":
             _save(conn, state="done", message="", waiting=0)
         return status(conn)
     finally:
+        try:
+            _save(conn, score_limit=None)      # a cap is for the one run it was asked for
+        except Exception:
+            log.exception("could not clear the scoring cap")
         conn.close()
+
+
+def request_scoring(uid: int, limit: int | None = None) -> None:
+    """Queue a run for this user that scores the jobs the model they are looking at has not scored, at most `limit` of them (best first)."""
+    conn = _connect(uid)
+    try:
+        _save(conn, score_limit=limit)
+    finally:
+        conn.close()
+    request(uid)
 
 
 # ---------------------------------------------------------------- the background worker

@@ -43,6 +43,8 @@ PHENOM_SITES = {
     "michaels": ("https://careers.michaels.com/us/en", "Michaels", "michaels"),
     "wawa": ("https://careers.wawa.com/us/en", "Wawa", "wawa"),
     "circlek": ("https://workwithus.circlek.com/global/en", "Circle K", "circlek"),    # worldwide: the location settings drop the rest
+    # Not a retailer: a large employer on the same Phenom career site (its robots.txt blocks nothing the search uses).
+    "disney": ("https://join.disneycareers.com/global/en", "Disney", "disney"),
 }
 # (config key, label for the run log, name of the fetch function here): one line per retailer.
 RETAIL_SOURCES = [("homedepot", "Home Depot", "fetch_homedepot"),
@@ -210,7 +212,7 @@ sources.DETAIL_FILLERS["homedepot"] = fill_homedepot_detail
 # Retailers on other systems have a module of their own (retail_oracle.py, retail_jibe.py, ...). Each lists its retailers in
 # `READERS = {key: (company label, fetch function)}`, registers its job page readers in sources.DETAIL_FILLERS, and is picked up here
 # when the file exists. A module that is missing is skipped; one that is broken raises, so a mistake is not hidden.
-READER_MODULES = ("retail_oracle", "retail_jibe", "retail_sitemap", "retail_successfactors", "retail_misc")
+READER_MODULES = ("retail_oracle", "retail_jibe", "retail_sitemap", "retail_successfactors", "retail_misc", "corp_misc")
 
 
 def _load_reader_modules() -> None:

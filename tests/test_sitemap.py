@@ -15,7 +15,7 @@ from tests.retailtools import Resp, Session
 DATA = Path(__file__).parent / "data"
 text = lambda name: (DATA / name).read_text(encoding="utf-8")
 KEYS = {"gap", "nike", "napa", "bathandbodyworks", "urbn", "ross", "lidl", "freshmarket", "wayfair", "ikea", "containerstore", "seveneleven",
-        "loves", "pilot", "publix", "walgreens"}
+        "loves", "pilot", "publix", "walgreens", "fidelity"}
 TERMS = ["software engineer", "cashier", "store manager", "data scientist", "analyst"]
 
 
@@ -325,7 +325,8 @@ class JobPages(unittest.TestCase):
                 "ikea": ("Retail Warehouse Associate (Full-Time)", "2026-10-30"), "containerstore": ("Central Design Specialist", "2026-09-28"),
                 "seveneleven": ("Store Leader (Manager) Trainee", "2026-11-02"), "loves": ("Cybersecurity Engineer II", "2026-10-23"),
                 "pilot": ("Sr Analyst, HR People Analytics", "2026-09-21"), "publix": ("Software Engineer – WMS Integration and Reporting (Hybrid)", "2026-11-02"),
-                "walgreens": ("Pharmacy Technician / Pharm Tech Apprenticeship", "2026-11-02")}
+                "walgreens": ("Pharmacy Technician / Pharm Tech Apprenticeship", "2026-11-02"),
+                "fidelity": ("Senior Software Engineer", "2026-11-03")}
         for key, (title, posted) in want.items():
             with self.subTest(key):
                 j, _ = self.read(key)

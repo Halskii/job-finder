@@ -6,21 +6,27 @@ max_age_days: 30          # drop postings older than this (when the posting date
 us_only: true             # drop postings whose location looks outside the US
 
 # Locations to exclude. A posting is dropped only if EVERY location it lists matches, so
-# "Denver, CO | Remote - US" is kept (you could still take the remote option).
+# "Denver, CO | Remote - US" is kept (you could still take the remote option). A location that says Remote
+# ("Remote - California") is never dropped by a state or city on this list; only an entry that says remote itself ("Remote - Canada") drops it.
 # Whole-word, case-insensitive; two-letter state codes must be capitalized. Leave the list empty to turn this off.
 exclude_locations: []
 #  - Florida
 #  - FL
 crawl_every_days: 30    # the web app looks for new company boards (for everyone's titles) this often. 0 = only when you run `python main.py crawl --add`
 fetch_every_hours: 0     # the web app reads every source for all users this often (24 = daily). 0 = only when you run `python main.py fetch`
+retry_hours: 1          # after the web app starts a crawl or a fetch it waits this long before starting another (in case it failed). Titles whose crawl never finishes cleanly would otherwise repeat it, and the fetch after it, every hour: 24 = at most one a day
+upkeep: auto            # auto = the web app fetches and crawls on its own (the two settings above). manual = it never does: a "Fetch new postings" button on the page starts a fetch, for a copy only you use
+check_open: true         # after each fetch, ask the employers' sites whether the postings people are looking at are still there, and leave out the ones taken down (liveness.py). false = never
 keep_postings_days: 14   # postings no source has listed for this long are deleted (unless a user has them as one of their jobs)
 store_max_age_days: 90   # postings clearly older than this are not stored at all
 # Paid calls (scoring, resume tailoring, interview prep, resume reading) allowed per day: for one person, and for the whole site together.
 # Scoring's per-person limit is scoring.max_per_user_per_day. Read on every check, so edits apply at once. paused: true stops them all (a kill switch).
+# unlimited: true removes every cap, this person's, the whole site's, scoring's and the per-run one, while the calls are still counted.
 limits:
   per_user_per_day: {tailor: 6, tips: 12, analyze: 6}
   all_users_per_day: {score: 4000, tailor: 100, tips: 300, analyze: 100}
   paused: false
+  unlimited: true       # this branch is for one person's own use: no caps (the two lines above apply only if this is false)
 request_delay: 0.4        # seconds between HTTP requests (be polite to job boards)
 
 profile_model: claude-sonnet-5-5   # used by `main.py profile` to read resume.pdf
@@ -31,6 +37,9 @@ tips_web_search: true              # let it search the web for what candidates r
 
 scoring:
   model: claude-haiku-5-5            # cheap first pass (it thinks briefly at low effort, see scorer.py); claude-sonnet-5-5 costs about 17 times as much
+  # Other models a person can switch to in the app (a menu in the top bar, shown only when this list has something in it). Each model's scores are
+  # kept apart, so switching shows that model's scores and back again; jobs a model has not scored show no score until it has, which the page offers to do.
+  # models: [claude-sonnet-5-5, claude-opus-5-5]
   max_per_run: 40                    # cap LLM calls per `main.py run` to control cost
   initial_batch: 50                  # the web app scores this many of a user's best matches at once, so there is something to read straight away
   batch_size: 50                     # then keeps going in background batches of this size
@@ -153,41 +162,9 @@ gov_titles:
 # Extra search words for the retailers (Lowe's, Home Depot, CVS and the others under `retailers:` below, and any Workday site added with --retail),
 # part of the shared fetch. Retailers hire for stores, warehouses and head offices alike, so these cover the common jobs of each kind. Everyone's own
 # titles are searched there too, so a person who saves "Pharmacy Technician" or "Barista" gets those without this list. Level markers are ignored.
-retail_titles:
-  - Cashier
-  - Sales Associate
-  - Customer Service Associate
-  - Customer Service Representative
-  - Stocker
-  - Store Manager
-  - Assistant Store Manager
-  - Department Manager
-  - Shift Supervisor
-  - Team Lead
-  - Team Member
-  - Pharmacy Technician
-  - Pharmacist
-  - Warehouse Associate
-  - Forklift Operator
-  - Order Selector
-  - Delivery Driver
-  - Truck Driver
-  - Merchandiser
-  - Loss Prevention
-  - Fulfillment Associate
-  - Receiver
-  - Maintenance Technician
-  - Automotive Technician
-  - Cook
-  - Barista
-  - Buyer
-  - Merchandise Planner
-  - Financial Analyst
-  - Accountant
-  - Recruiter
-  - Marketing Specialist
-  - Supply Chain Analyst
-  - Store Planner
+# Emptied on this branch: no store, warehouse or head-office jobs are searched for, only the tech titles above and anyone's own saved titles.
+# The starter list (cashier, store manager, pharmacy technician, ...) is in main's config.example.yaml.
+retail_titles: []
 
 # Government sources, on by default. Set enabled: false to turn one off.
 #  usajobs: the federal API. Needs a free key: add USAJOBS_API_KEY and USAJOBS_EMAIL (the email the key was issued to)

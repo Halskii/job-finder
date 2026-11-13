@@ -38,6 +38,10 @@ ORACLE_SITES = {
     "williamssonoma": ("ehac.fa.us6.oraclecloud.com", "CX_1", "Williams-Sonoma"),
     "athome": ("hdiy.fa.us2.oraclecloud.com", "CX", "At Home"),
     "warbyparker": ("fa-evdi-saasfaprod1.fa.ocs.oraclecloud.com", "CX_1", "Warby Parker"),
+    # Not retailers: large employers that run the same career site on Oracle (checked: no robots.txt, the list answers anonymously).
+    "honeywell": ("ibqbjb.fa.ocs.oraclecloud.com", "Honeywell", "Honeywell"),            # careers.honeywell.com
+    "texasinstruments": ("edbz.fa.us2.oraclecloud.com", "CX", "Texas Instruments"),    # careers.ti.com
+    "oracle": ("eeho.fa.us2.oraclecloud.com", "CX_45001", "Oracle"),                    # careers.oracle.com
 }
 # Where the posting has no brand field, the brand is in the title ("Aerie - Brand Ambassador", "WE Dadeland 878 PT Stock Assoc").
 # key -> [(company, pattern on the title)], first match wins.

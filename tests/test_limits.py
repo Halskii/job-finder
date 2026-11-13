@@ -117,6 +117,86 @@ class ScoringLimitTests(Base):
         self.assertEqual(st["matched"], 1)                                                  # matching is free, so it still happened
 
 
+class UnlimitedTests(Base):
+    """`limits: unlimited: true` (a copy for one person's own use): every cap is off, the calls are still counted, and the pause switch still works."""
+    def conn(self, uid):
+        return pgtest.connect(self.schema, user=uid)
+
+    def test_it_is_off_unless_the_config_turns_it_on(self):
+        with mock.patch.object(tailor, "config_value", configured()):
+            self.assertFalse(limits.settings()["unlimited"])
+            self.assertFalse(limits.unlimited())
+        with mock.patch.object(tailor, "config_value", configured(unlimited=True)):
+            self.assertTrue(limits.settings()["unlimited"])
+
+    def test_no_daily_cap_of_any_kind_applies_and_everything_is_still_counted(self):
+        conn = self.conn(self.user())
+        caps = configured(unlimited=True, per_user_per_day={"tailor": 1, "letter": 1, "tips": 1, "analyze": 1, "skills": 1},
+                          all_users_per_day={"score": 1, "tailor": 1, "letter": 1, "tips": 1, "analyze": 1, "skills": 1})
+        with mock.patch.object(tailor, "config_value", caps):
+            for kind in ("tailor", "letter", "tips", "analyze", "skills"):
+                for _ in range(4):                                               # four times a cap of one
+                    with limits.paid_call(conn, kind) as spent:
+                        spent.tokens(100, 20)
+                self.assertEqual(limits.user_left(conn, kind), limits.UNLIMITED, kind)
+                self.assertEqual(limits.everyone_left(conn, kind), limits.UNLIMITED, kind)
+                self.assertEqual(db.usage_today(conn, kind), 4, kind)           # counted, so `main.py usage` still shows what it cost
+            self.assertEqual(limits.everyone_left(conn, "score"), limits.UNLIMITED)
+        row = conn.execute("SELECT tokens_in, tokens_out FROM usage WHERE kind = 'tips'").fetchone()
+        self.assertEqual((row["tokens_in"], row["tokens_out"]), (400, 80))
+        conn.close()
+
+    def test_with_it_off_the_same_caps_still_stop_a_person(self):
+        conn = self.conn(self.user())
+        with mock.patch.object(tailor, "config_value", configured(unlimited=False, per_user_per_day={"tailor": 1})):
+            with limits.paid_call(conn, "tailor"):
+                pass
+            with self.assertRaises(UserError):
+                limits.check(conn, "tailor")
+        conn.close()
+
+    def test_the_pause_switch_still_stops_everything(self):
+        conn = self.conn(self.user())
+        with mock.patch.object(tailor, "config_value", configured(unlimited=True, paused=True)):
+            for kind in ("score", "tailor", "letter", "tips", "analyze", "skills"):
+                with self.assertRaises(UserError) as ctx:
+                    limits.check(conn, kind)
+                self.assertEqual(ctx.exception.code, "paused", kind)
+        conn.close()
+
+    def test_scoring_goes_past_the_persons_cap_and_the_sites(self):
+        for i in range(6):
+            add_posting(self.admin, f"j{i}", "Software Engineer", company=f"C{i}", description="Python " * (6 - i))
+        uid = self.user()
+        self.scfg["max_per_user_per_day"] = 2
+        client, calls = self.client()
+        with mock.patch.object(tailor, "config_value", configured(unlimited=True, all_users_per_day={"score": 3})):
+            st = pipeline.run_user(uid, client)
+        self.assertEqual((st["state"], st["waiting"], len(calls)), ("done", 0, 6))        # a cap of 2 a person and 3 a site did not stop it
+        self.assertEqual(st["left_today"], limits.UNLIMITED)
+        self.assertNotIn("tomorrow", st["message"])
+
+    def test_the_same_run_with_it_off_is_stopped_at_the_persons_cap(self):
+        for i in range(6):
+            add_posting(self.admin, f"j{i}", "Software Engineer", company=f"C{i}", description="Python " * (6 - i))
+        uid = self.user()
+        self.scfg["max_per_user_per_day"] = 2
+        client, calls = self.client()
+        with mock.patch.object(tailor, "config_value", configured(unlimited=False)):
+            st = pipeline.run_user(uid, client)
+        self.assertEqual((st["waiting"], len(calls), st["left_today"]), (4, 2, 0))
+
+    def test_the_run_command_has_no_cap_either_unless_given_one(self):
+        import main
+        with mock.patch.object(tailor, "config_value", configured(unlimited=True)):
+            self.assertEqual(main.run_cap(None, {"max_per_run": 40}), limits.UNLIMITED)
+            self.assertEqual(main.run_cap(10, {"max_per_run": 40}), 10)                  # --limit is still honored
+        with mock.patch.object(tailor, "config_value", configured()):
+            self.assertEqual(main.run_cap(None, {"max_per_run": 40}), 40)
+            self.assertEqual(main.run_cap(None, {}), 40)
+            self.assertEqual(main.run_cap(5, {"max_per_run": 40}), 5)
+
+
 class LimitsOverHttpTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

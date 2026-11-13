@@ -57,7 +57,7 @@ def pick(conn, model: str, redo_all: bool = False, limit: int | None = None) -> 
     """(the jobs to score again, best score first; how many scored jobs the person is looking at; how many of those are done already).
     A job without its text cannot be scored, so it is left out."""
     rows = conn.execute("SELECT id, score, verdict, analysis FROM jobs WHERE score IS NOT NULL AND status = ANY(?)"
-                        " AND COALESCE(description, '') <> '' ORDER BY score DESC, id", (list(STATUSES),)).fetchall()
+                        " AND COALESCE(description, '') <> '' AND closed_at IS NULL ORDER BY score DESC, id", (list(STATUSES),)).fetchall()
     todo = [r for r in rows if redo_all or scored_with(r["analysis"]) != model]
     return (todo[:limit] if limit else todo), len(rows), len(rows) - len(todo)
 
@@ -103,10 +103,11 @@ def run(who, *, redo_all: bool = False, limit: int | None = None, dry_run: bool 
         log(limits.PAUSED + " (limits: paused in config.yaml)")
         return 1
     scfg = pipeline.scoring_config()
-    model, price = scfg["model"], scfg.get("price_per_million_tokens") or {}
+    price = scfg.get("price_per_million_tokens") or {}
 
     conn = pipeline._connect(uid)
     try:
+        model = db.active_model(conn)      # the model this person is looking at, which is not always the one in config.yaml
         todo, looking_at, done = pick(conn, model, redo_all, limit)
         est = estimate(todo, model, price)
         log(f"{label}: {looking_at:,} scored jobs they are looking at (new or saved), {done:,} already scored with {model}.")

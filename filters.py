@@ -100,7 +100,9 @@ def compile_exclusions(terms: list[str]) -> list[re.Pattern]:
 
 def exclusion_ok(location: str, patterns: list[re.Pattern]) -> bool:
     """False only when EVERY location listed for the posting is excluded.
-    'San Francisco, CA | Remote - US' stays (the remote option is still open to you); 'San Francisco, CA' is dropped."""
+    'San Francisco, CA | Remote - US' stays (the remote option is still open to you); 'San Francisco, CA' is dropped.
+    A remote location ('Remote - California', 'Remote, CA') is not excluded by a place's name: the work can be done from anywhere. Only
+    an exclusion that itself says remote ('Remote - Canada') drops it."""
     if not patterns or not (location or "").strip():
         return True
     # Split on ; | newline and the word 'or'. Also split on a comma that starts a "US-XXX" entry (Stripe-style
@@ -108,7 +110,12 @@ def exclusion_ok(location: str, patterns: list[re.Pattern]) -> bool:
     parts = [p.strip() for p in re.split(r"[;|\n]|\bor\b|,\s*(?=US-)", location) if p.strip()]
     if not parts:
         return True
-    return any(not any(p.search(part) for p in patterns) for part in parts)
+
+    def excluded(part: str) -> bool:
+        remote = re.search(r"\bremote\b", part, re.I) is not None
+        return any(p.search(part) for p in patterns if not remote or "remote" in p.pattern.lower())
+
+    return any(not excluded(part) for part in parts)
 
 
 def pay_ok(pay_max: float | None, pay_min: float | None, minimum: int, unit: str = "year") -> bool:

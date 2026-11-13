@@ -14,7 +14,6 @@ import sys
 import threading
 import time
 import webbrowser
-from pathlib import Path
 from urllib.parse import urlparse
 
 from fastapi import Depends, FastAPI, Request
@@ -24,6 +23,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 import auth
 import db
 import limits
+import liveness
 import loginpage
 import onboarding
 import pipeline
@@ -461,6 +461,66 @@ def start_run(uid: int) -> dict:
     return run_status(uid)
 
 
+# ---------------------------------------------------------------- fetching by hand
+
+def manual_upkeep() -> bool:
+    """True when `upkeep: manual` is set in config.yaml: the web app never fetches or crawls on its own, and the page shows a
+    "Fetch new postings" button instead. Anything else (the default, `auto`) keeps the automatic daily upkeep."""
+    return str(tailor.config_value("upkeep", "auto") or "auto").strip().lower() == "manual"
+
+
+FETCH_LOCK = threading.Lock()
+FETCH: dict = {"running": False, "started": 0.0, "result": None}   # the fetch started from the button in this server (read and set under FETCH_LOCK)
+
+
+def fetch_status() -> dict:
+    """Whether the button should show, whether a fetch is going, when the last one finished and what it did."""
+    conn = pipeline._connect(False)
+    try:
+        last = float(db.get_meta(conn, "fetch_all_last") or 0)
+    finally:
+        conn.close()
+    with FETCH_LOCK:
+        return {"manual": manual_upkeep(), "running": FETCH["running"], "started": FETCH["started"] or None,
+                "last": last or None, "result": FETCH["result"]}
+
+
+def run_fetch_by_hand() -> None:
+    """The work behind the button: one shared fetch of every source, then everyone with a saved search is queued to be matched."""
+    import ingest
+    try:
+        result = ingest.run_fetch()
+    except Exception as ex:
+        log.warning("Fetch by hand stopped: %s", ex)
+        result = {"error": explain(ex)[0]}
+    with FETCH_LOCK:
+        FETCH.update(running=False, result=result)
+    WAKE.set()   # the scheduler hands the queued searches to the worker now, not at its next minute
+
+
+@app.get("/api/fetch/status")
+def fetch_status_(user: dict = Depends(current_user)):
+    return fetch_status()
+
+
+@app.post("/api/fetch")
+def fetch_(user: dict = Depends(current_user)):
+    """Start the shared fetch of every job source, in the background. Refused unless `upkeep: manual` is set, so on the deployed site
+    nobody can start the (slow, memory-hungry) fetch themselves."""
+    if not manual_upkeep():
+        raise Problem(403, "Fetching is automatic here.", "fetch_off")
+    with FETCH_LOCK:
+        if FETCH["running"]:
+            raise Problem(409, "A fetch is already running.", "busy")
+        FETCH.update(running=True, started=time.time(), result=None)
+    if RUNS:
+        threading.Thread(target=run_fetch_by_hand, name="fetch-by-hand", daemon=True).start()
+    else:
+        with FETCH_LOCK:
+            FETCH.update(running=False)
+    return fetch_status()
+
+
 @app.get("/api/tracker")
 def tracker(user: dict = Depends(current_user)):
     return viewer.load_tracker(user["id"])
@@ -487,6 +547,132 @@ def job(job_id: str, user: dict = Depends(current_user)):
     if found is None:
         raise not_found()
     return found
+
+
+CHECK_LOCK = threading.Lock()
+CHECKS: dict = {}     # user id -> {"running", "done", "total", "result"}: the check of a person's jobs started from the page (read and set under CHECK_LOCK)
+
+
+def check_status(uid: int) -> dict:
+    """Whether a check of this person's jobs is going, how far it has got, what the last one found, and what the page should say."""
+    with CHECK_LOCK:
+        state = dict(CHECKS.get(uid) or {"running": False, "done": 0, "total": 0, "result": None})
+    return {**state, **viewer.check_summary_for(uid)}
+
+
+def run_check(uid: int) -> None:
+    """The work behind the page's "Check now": ask about every job of this person that has not been asked about lately."""
+    def progress(done, total):
+        with CHECK_LOCK:
+            CHECKS[uid].update(done=done, total=total)
+    conn = None
+    try:
+        conn = viewer._db(uid)
+        result = liveness.sweep(conn, liveness.due_rows(conn, viewer.matches_min_score()), delay=float(tailor.config_value("request_delay", 0.4)), progress=progress)
+    except Exception as ex:
+        log.warning("Check of postings stopped: %s", ex)
+        result = {"error": explain(ex)[0]}
+    finally:
+        if conn is not None:
+            conn.close()
+    with CHECK_LOCK:
+        CHECKS[uid].update(running=False, result=result)
+
+
+@app.get("/api/jobs/check-status")
+def check_status_(user: dict = Depends(current_user)):
+    return check_status(user["id"])
+
+
+@app.post("/api/jobs/check-all")
+def check_all(user: dict = Depends(current_user)):
+    """Ask each source whether this person's jobs are still on its site, in the background (see liveness.py)."""
+    uid = user["id"]
+    with CHECK_LOCK:
+        if (CHECKS.get(uid) or {}).get("running"):
+            raise Problem(409, "A check is already running.", "busy")
+        CHECKS[uid] = {"running": True, "done": 0, "total": 0, "result": None}
+    if RUNS:
+        threading.Thread(target=run_check, args=(uid,), name="check-open", daemon=True).start()
+    else:
+        with CHECK_LOCK:
+            CHECKS[uid]["running"] = False
+    return check_status(uid)
+
+
+@app.post("/api/jobs/check")
+def check_one(body: dict = Depends(json_body), user: dict = Depends(current_user)):
+    """Ask whether one of this person's jobs is still on its employer's site: {"state": "open" | "closed" | "unknown", "checked", "supported"}."""
+    job_id = body.get("id")
+    if not isinstance(job_id, str) or not job_id or len(job_id) > 400:
+        raise bad_request()
+    try:
+        return viewer.check_job_for(user["id"], job_id)
+    except LookupError:
+        raise not_found()
+
+
+@app.get("/api/models")
+def models(user: dict = Depends(current_user)):
+    return viewer.models_for(user["id"])
+
+
+@app.post("/api/model")
+def choose_model(body: dict = Depends(json_body), user: dict = Depends(current_user)):
+    """Look at another model's scores (one the config lists). With `score` true, also queue the jobs that model has not scored yet (the best `limit` of them, when
+    a limit is given); they are scored by the same background run as new matches, so the page's progress bar shows it."""
+    model, score, limit = body.get("model"), body.get("score", False), body.get("limit")
+    if (not isinstance(model, str) or not isinstance(score, bool)
+            or not (limit is None or (isinstance(limit, int) and not isinstance(limit, bool) and 1 <= limit <= 1_000_000))):
+        raise bad_request()
+    lock = user_lock("model", user["id"])
+    if not lock.acquire(blocking=False):
+        raise Problem(409, "Already switching models. Wait for it to finish.", "busy")
+    try:
+        try:
+            result = viewer.choose_model(user["id"], model)
+        except ValueError:
+            raise Problem(400, "That model is not one you can choose.", "bad_model")
+        if score and result["waiting"]:
+            if run_status(user["id"])["state"] in pipeline.ACTIVE:
+                raise Problem(409, "A search is already running. Try again when it has finished.", "busy")
+            if RUNS:
+                pipeline.request_scoring(user["id"], limit)
+            result["run"] = run_status(user["id"])
+        return result
+    finally:
+        lock.release()
+
+
+@app.post("/api/jobs/add")
+def add_job_(body: dict = Depends(json_body), user: dict = Depends(current_user)):
+    """Add a posting the person pasted in by hand, for sites this program does not read. It becomes one of their jobs (saved, or applied
+    when `applied` is true) and is scored like the others. Nothing is fetched from `url`; it is only kept as the job's link."""
+    fields = {k: body.get(k, "") for k in ("text", "url", "company", "title", "location")}
+    applied = body.get("applied", False)
+    if not all(isinstance(v, str) for v in fields.values()) or not isinstance(applied, bool):
+        raise bad_request()
+    lock = user_lock("addjob", user["id"])
+    if not lock.acquire(blocking=False):
+        raise Problem(409, "Already adding a job. Wait for it to finish.", "busy")
+    try:
+        result = viewer.add_manual_job(user["id"], applied=applied, **fields)
+        scored, note = result.get("score") is not None, None
+        if not scored:                                    # new, or an earlier add whose scoring could not run
+            outcome = pipeline.score_one(user["id"], result["id"])
+            scored, note = outcome["scored"], outcome.get("reason")
+        return {**result, "scored": scored, "note": note}
+    finally:
+        lock.release()
+
+
+@app.get("/api/payestimate/{job_id:path}")
+def payestimate(job_id: str, user: dict = Depends(current_user)):
+    """An estimated pay range for a job that states none, from the Bureau of Labor Statistics wage survey. Free: no model call."""
+    try:
+        return viewer.payestimate_for(user["id"], job_id)
+    except LookupError:
+        raise not_found() from None
 
 
 @app.get("/api/files/{name}")
@@ -596,6 +782,30 @@ def skills_(body: dict = Depends(json_body), user: dict = Depends(current_user))
         lock.release()
 
 
+@app.post("/api/roledesc")
+def roledesc_(body: dict = Depends(json_body), user: dict = Depends(current_user)):
+    """A description of one of this person's earlier jobs (their most recent, or the company named in `employer`), worded for one posting.
+    One model call."""
+    job_id = job_id_of(body)
+    employer = body.get("employer", "")
+    if not isinstance(employer, str):
+        raise bad_request()
+    lock = user_lock("roledesc", user["id"])
+    if not lock.acquire(blocking=False):
+        raise Problem(409, "Already writing a role description. Wait for it to finish.", "busy")
+    conn = viewer._db(user["id"])
+    try:
+        with limits.paid_call(conn, "roledesc") as spent:
+            result = viewer.roledesc_for(user["id"], job_id, employer)
+            spent.tokens(result["tokens"]["in"], result["tokens"]["out"])
+            return {k: v for k, v in result.items() if k != "tokens"}
+    except LookupError:
+        raise not_found() from None
+    finally:
+        conn.close()
+        lock.release()
+
+
 @app.post("/api/tips")
 def tips_(body: dict = Depends(json_body), user: dict = Depends(current_user)):
     """Interview prep for a job, streamed to the page as it is written, one JSON event per line. A saved answer comes at once."""
@@ -647,7 +857,9 @@ def scheduler() -> None:
     """Runs for as long as the server does. Every minute (or at once when woken): hands the worker any user marked as waiting (the
     daily fetch may have run in another process), and does whatever shared upkeep is due, one thing at a time, in the background:
     boards for titles nobody has searched yet (at once), the monthly crawl for new boards (`crawl_every_days`, default 30), and the
-    shared fetch of every posting (`fetch_every_hours`, default 0 = only when `main.py fetch` is run)."""
+    shared fetch of every posting (`fetch_every_hours`, default 0 = only when `main.py fetch` is run). After starting a crawl or fetch
+    it leaves `retry_hours` (default 1) before starting another. With `upkeep: manual` in config.yaml it does none of that upkeep (a
+    fetch then starts only from the page's "Fetch new postings" button); it still hands queued searches to the worker."""
     import discovery
     import ingest
     import main as program
@@ -665,12 +877,13 @@ def scheduler() -> None:
     while True:
         try:
             pipeline.poll_queued()
-            if not busy.is_set():
+            if not busy.is_set() and not manual_upkeep():   # `upkeep: manual`: only the page's Fetch button starts a fetch or a crawl
                 conn = pipeline._connect(False)
                 try:
                     cfg = discovery.load_config(program.ROOT, conn)
                     job = ingest.next_job(conn, cfg, float(tailor.config_value("crawl_every_days", 30) or 0),
-                                          float(tailor.config_value("fetch_every_hours", 0) or 0))
+                                          float(tailor.config_value("fetch_every_hours", 0) or 0),
+                                          retry_hours=float(tailor.config_value("retry_hours", 1) or 1))
                 finally:
                     conn.close()
                 if job:

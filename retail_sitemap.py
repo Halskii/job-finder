@@ -94,6 +94,9 @@ SITES: dict[str, Site] = {
     "publix": Site("Publix", ("https://jobs.publix.com/sitemap.xml",), r"/job-opening/(?P<id>(?P<slug>[^/]+))", children=r"job_opening-sitemap\.xml$",
                    cut=r"-\d+$", reader="publix", country="United States"),
     "walgreens": Site("Walgreens", ("https://jobs.walgreens.com/en/sitemap.xml",), _radancy("/en"), country="United States"),
+    # Not a retailer: a large employer whose English-language career site lists its jobs in a sitemap (robots.txt allows everything).
+    "fidelity": Site("Fidelity Investments", ("https://jobs.fidelity.com/sitemap.xml",), r"/en/jobs/(?P<id>\d+)/(?P<slug>[^/?#]+)",
+                     country="United States"),
 }
 
 

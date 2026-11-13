@@ -45,7 +45,8 @@ def fetch(reply, terms, pages=20, delay=0.4, source="heb"):
 
 class Registered(unittest.TestCase):
     def test_every_key_has_a_fetcher_and_the_text_comes_with_the_list(self):
-        self.assertEqual(set(rj.READERS), {"sprouts", "ulta", "jcpenney", "petsmart", "costco", "heb", "footlocker", "sheetz"})
+        self.assertEqual(set(rj.READERS), {"sprouts", "ulta", "jcpenney", "petsmart", "costco", "heb", "footlocker", "sheetz",
+                                         "amd", "statefarm", "garmin"})
         for key, (label, fn) in rj.READERS.items():
             self.assertTrue(callable(fn) and label, key)
             self.assertNotIn(key, sources.DETAIL_FILLERS)       # the list holds the full text, so no posting is read again later

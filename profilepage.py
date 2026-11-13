@@ -71,7 +71,7 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--accent);outline-
 <div><label for="max_age">Show postings from the last</label><select id="max_age"><option value="7">7 days</option><option value="14">14 days</option><option value="30">30 days</option><option value="60">60 days</option><option value="90">90 days</option></select></div>
 </div>
 <label class="check"><input type="checkbox" id="us_only"> Only jobs in the United States</label>
-<label for="exclude_locations">Skip jobs in these places <small>(commas; a state, a city, or "Remote - Canada")</small></label>
+<label for="exclude_locations">Skip jobs in these places <small>(commas; a state, a city, or "Remote - Canada". Remote jobs are kept unless an entry says remote)</small></label>
 <input type="text" id="exclude_locations" autocomplete="off">
 </section>
 

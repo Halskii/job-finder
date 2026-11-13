@@ -348,5 +348,17 @@ class RoundTripTests(unittest.TestCase):
         self.assertEqual(j["resume_angle"], "Lead with agents.")
 
 
+class SortOptionTests(unittest.TestCase):
+    def test_the_list_can_be_sorted_and_the_default_is_the_match_score(self):
+        page = viewer.PAGE
+        self.assertIn('<select id="sort"', page)
+        first = page.index('<select id="sort"')
+        options = page[first:page.index("</select>", first)]
+        self.assertLess(options.index('value="score"'), options.index('value="salary"'))     # best match comes first
+        self.assertIn('value="posted"', options)
+        self.assertIn('let sortBy="score"', page)                                           # and it is what the page starts with
+        self.assertIn("ordered(visible.filter(", page)                                      # the shown list goes through the sort
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -8,6 +8,8 @@ from datetime import date, timedelta
 from pathlib import Path
 from unittest import mock
 
+import psycopg
+
 import auth
 import db
 import ingest
@@ -217,7 +219,7 @@ class FetchRunTests(Base):
         self.admin.commit()
         seen = {}
 
-        def collect(cfg, conn, outcomes=None):
+        def collect(cfg, conn, outcomes=None, sink=None):
             seen["titles"] = cfg["titles"]
             return [job("a"), job("b", company="B")]
         with mock.patch.object(main, "collect", collect), mock.patch.object(main.discovery, "load_config", return_value={"titles": ["Platform Engineer"]}):
@@ -230,10 +232,45 @@ class FetchRunTests(Base):
         conn.close()
         self.assertFalse(ingest.due(self.anon, 24))                                  # it just ran
 
+    def test_postings_handed_over_while_reading_are_stored_and_counted_with_the_rest(self):
+        def collect(cfg, conn, outcomes=None, sink=None):
+            sink([job("a"), job("b", company="B")])           # what a big reader does as each source finishes
+            sink([job("a"), job("c", company="C")])           # "a" again: the same posting listed twice is stored once
+            return [job("d", company="D")]                      # and what is left comes back as before
+        with mock.patch.object(main, "collect", collect), mock.patch.object(main.discovery, "load_config", return_value={"titles": []}):
+            stats = ingest.run_fetch(queue_users=False)
+        self.assertEqual((stats["fetched"], stats["new"], stats["skipped_old"]), (5, 4, 0))
+        self.assertEqual(self.anon.execute("SELECT COUNT(*) AS n FROM postings").fetchone()["n"], 4)
+
+    def test_the_saver_counts_too_old_postings_and_leaves_no_transaction_open(self):
+        saver = ingest.Saver(self.admin, 30)
+        self.assertEqual(self.admin.raw.info.transaction_status, psycopg.pq.TransactionStatus.IDLE)   # not held open while the sources are read
+        saver([job("a"), job("b", company="B", posted="2020-01-01")])
+        self.assertEqual(saver.stats(), {"fetched": 2, "new": 1, "skipped_old": 1})
+
+    def test_give_back_memory_never_fails(self):
+        ingest.give_back_memory()                              # on Windows there is no malloc_trim, and that is fine
+
     def test_queueing_can_be_turned_off_and_nothing_is_run_in_the_command(self):
         self.user()
         stats = self.run_fetch([job("a")], queue_users=False)
         self.assertEqual(stats["queued"], 0)
+
+    def test_a_finished_fetch_says_so_with_what_it_stored(self):
+        with mock.patch.object(main, "log") as log:
+            stats = self.run_fetch([job("a"), job("b", company="B")], queue_users=False)
+        said = [call.args[0] for call in log.call_args_list if "Job Retrieval Complete" in call.args[0]]
+        self.assertEqual(len(said), 1)
+        self.assertIn(f"{stats['new']:,} new postings stored", said[0])
+        self.assertIn("2 read", said[0])
+
+    def test_a_fetch_that_is_skipped_does_not_say_it_is_complete(self):
+        other = pgtest.connect(self.schema, user=False)
+        self.assertTrue(other.execute("SELECT pg_try_advisory_lock(?) AS ok", (ingest.LOCK,)).fetchone()["ok"])
+        with mock.patch.object(main, "log") as log:
+            self.assertIn("skipped", self.run_fetch([]))
+        self.assertFalse(any("Job Retrieval Complete" in call.args[0] for call in log.call_args_list))
+        other.close()
 
     def test_only_one_fetch_runs_at_a_time(self):
         other = pgtest.connect(self.schema, user=False)
@@ -279,6 +316,9 @@ class SchedulerTests(Base):
     def run_one_round(self, job):
         """One pass of the scheduler, with `job` as the answer to 'what is due'. Returns (jobs run, polls made)."""
         ran, started = [], threading.Event()
+        automatic = mock.patch.object(web, "manual_upkeep", return_value=False)   # whatever `upkeep:` says in this computer's config.yaml
+        automatic.start()
+        self.addCleanup(automatic.stop)
         with mock.patch.object(web.pipeline, "poll_queued") as poll, mock.patch.object(ingest, "next_job", return_value=job),                 mock.patch.object(ingest, "run_job", side_effect=lambda j, connect=None: ran.append(j) or started.set() or {}),                 mock.patch.object(main.discovery, "load_config", return_value={}),                 mock.patch.object(web.WAKE, "wait", side_effect=self.Stop):
             with self.assertRaises(self.Stop):
                 web.scheduler()

@@ -9,7 +9,12 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 import db
+import limits
+import liveness
+import manualjob
+import payest
 import reformat
+import roledesc
 import sources
 import tailor
 import skills
@@ -155,6 +160,7 @@ def job_dict(r) -> dict:
         "resume_angle": a.get("resume_angle", ""), "url": safe_url(r["url"] or ""), "description": r["description"] or "",
         "status": r["status"], "notes": r["notes"] or "", "applied_at": r["applied_at"],
         "can_reformat": reformat.can_reformat(r["id"], r["formatted"]),
+        "closed": r.get("closed_at") is not None, "checked": r.get("checked_at"), "can_check": liveness.can_check(r["id"]),   # taken down by the employer (liveness.py)
     }
 
 
@@ -359,6 +365,103 @@ def skills_for(uid: int, job_id: str) -> dict:
         conn.close()
 
 
+def roledesc_for(uid: int, job_id: str, employer: str = "") -> dict:
+    conn = _db(uid)
+    try:
+        return roledesc.for_job(conn, job_id, employer)
+    finally:
+        conn.close()
+
+
+def add_manual_job(uid: int, text: str, url: str = "", company: str = "", title: str = "", location: str = "", applied: bool = False) -> dict:
+    """Keep a posting this person pasted in (see manualjob.py) as one of their jobs: saved, or applied when they already applied. When the
+    title or company was left blank, one small model call reads them from the text. {"id", "title", "company", "duplicate", "score"}."""
+    conn = _db(uid)
+    try:
+        text, url = manualjob.clean_text(text), manualjob.clean_url(url)
+        company, title, location = manualjob.clean_field(company), manualjob.clean_field(title), manualjob.clean_field(location)
+        if (len(text) >= manualjob.MIN_TEXT and not (company and title)
+                and manualjob.existing(conn, manualjob.job_id(url, text), "", "") is None):      # a posting already held is not read again
+            with limits.paid_call(conn, "addjob") as spent:
+                found, tokens_in, tokens_out = manualjob.basics(text)
+                spent.tokens(tokens_in, tokens_out)
+            company, title, location = company or found["company"], title or found["title"], location or found["location"]
+        result = manualjob.store(conn, userdata.load_profile(uid), text=text, url=url, company=company, title=title, location=location)
+    finally:
+        conn.close()
+    if applied and not result["duplicate"]:
+        mark_status(uid, result["id"], "applied")      # the tracker takes it from here, with today's date
+    return result
+
+
+def matches_min_score() -> int:
+    """The lowest score the list of matches shows."""
+    return int((tailor.config_value("scoring", {}) or {}).get("report_min_score", 60))
+
+
+def check_job_for(uid: int, job_id: str) -> dict:
+    """Ask the job's source now whether it still has the posting (unless it was asked lately). See liveness.check_job."""
+    conn = _db(uid)
+    try:
+        return liveness.check_job(conn, job_id)
+    finally:
+        conn.close()
+
+
+def check_summary_for(uid: int) -> dict:
+    conn = _db(uid)
+    try:
+        return liveness.summary(conn, matches_min_score())
+    finally:
+        conn.close()
+
+
+def models_for(uid: int) -> dict:
+    """The scoring models this person can look at and the one they are looking at now. {"models": [{"id", "label", "scored"}], "active",
+    "choice": whether there is more than one to choose from, "waiting": jobs they are looking at that the active model has not scored,
+    "looking_at": how many jobs they are looking at (new or saved)}."""
+    import pipeline
+    conn = _db(uid)
+    try:
+        active, counts = db.active_model(conn), db.model_counts(conn)
+        names = pipeline.allowed_models()
+        names += [m for m in [active, *counts] if m not in names]        # one chosen earlier that the config no longer lists still shows
+        looking = conn.execute("SELECT COUNT(*) AS n, COUNT(*) FILTER (WHERE score IS NULL AND COALESCE(description, '') <> '') AS waiting"
+                               " FROM jobs WHERE status IN ('new', 'saved')").fetchone()
+        return {"models": [{"id": m, "label": pipeline.model_label(m), "scored": counts.get(m, 0)} for m in names], "active": active,
+                "choice": len(pipeline.allowed_models()) > 1, "waiting": looking["waiting"], "looking_at": looking["n"]}
+    finally:
+        conn.close()
+
+
+def choose_model(uid: int, model: str) -> dict:
+    """Show this person the scores of `model`, one of the models in config.yaml. ValueError for any other."""
+    import pipeline
+    if model not in pipeline.allowed_models():
+        raise ValueError(model)
+    conn = _db(uid)
+    try:
+        if db.active_model(conn) != model:
+            db.set_active_model(conn, model)
+    finally:
+        conn.close()
+    return models_for(uid)
+
+
+def payestimate_for(uid: int, job_id: str) -> dict:
+    """An estimated pay range for one of this person's jobs that states no pay (see payest.py). LookupError when there is no such job."""
+    conn = _db(uid)
+    try:
+        row = conn.execute("SELECT title, location, pay_min, pay_max FROM jobs WHERE id=?", (job_id,)).fetchone()
+        if row is None:
+            raise LookupError(job_id)
+        if row["pay_min"] or row["pay_max"]:
+            return {"ok": False, "reason": "has_pay"}      # the posting states its own pay
+        return payest.estimate(conn, row["title"] or "", row["location"] or "")
+    finally:
+        conn.close()
+
+
 PAGE = r"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Job matches</title>
@@ -380,6 +483,11 @@ nav header{padding:12px;border-bottom:1px solid var(--line);display:grid;gap:8px
 nav select,nav input{width:100%;padding:7px 9px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink);font:inherit}
 #list{overflow:auto;flex:1}
 #progress{padding:9px 12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--mute);display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+#fetchbar{padding:9px 12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--mute);display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+#fetchbar[hidden]{display:none}#fetchbar.err{color:var(--bad)}
+#modelbar{padding:9px 12px;border-bottom:1px solid var(--line);font-size:13px;color:var(--mute);display:flex;align-items:center;gap:8px;flex-wrap:wrap}#modelbar[hidden]{display:none}
+#model-sel{max-width:190px;min-width:0}#model-sel[hidden]{display:none}
+.closed-note{border:1px solid var(--bad);color:var(--bad);border-radius:8px;padding:8px 12px;margin:8px 0;font-size:13px;line-height:1.45}.closed-note[hidden]{display:none}
 #progress[hidden]{display:none}#progress.err{color:var(--bad)}#progress .link{background:none;border:0;color:var(--accent);font:inherit;padding:0;cursor:pointer;text-decoration:underline}
 .item{display:flex;gap:10px;padding:10px 12px;border-bottom:1px solid var(--line);cursor:pointer;text-decoration:none;color:inherit}
 .item:hover{background:var(--bg)}.item.sel{background:var(--bg);box-shadow:inset 3px 0 var(--accent)}
@@ -387,7 +495,7 @@ nav select,nav input{width:100%;padding:7px 9px;border:1px solid var(--line);bor
 .score.hi{color:var(--good);border-color:var(--good)}.score.mid{color:var(--warn);border-color:var(--warn)}
 .item .t{font-weight:600;line-height:1.3}.item .c{color:var(--mute);font-size:13px}
 .item.done{opacity:.55}
-.searchrow{display:flex;gap:8px}.searchrow input{flex:1;min-width:0}
+.searchrow{display:flex;gap:8px}.searchrow input{flex:1;min-width:0}.searchrow select{flex:0 0 auto;max-width:140px;min-width:0}
 #filter-btn{display:flex;align-items:center;gap:6px;padding:6px 10px;white-space:nowrap}
 #filter-btn[aria-expanded="true"]{border-color:var(--accent);color:var(--accent)}
 #filter-badge{min-width:18px;height:18px;padding:0 5px;border-radius:99px;background:var(--accent);color:var(--on-accent);font-size:11px;font-weight:700;display:grid;place-items:center}#filter-badge[hidden]{display:none}
@@ -432,6 +540,9 @@ h1{font-size:22px;margin:0 0 4px}.sub{color:var(--mute);margin:0 0 14px}
 .dl .btn{padding:4px 12px;font-size:13px;color:var(--accent)}
 .dl-warn{color:var(--warn);margin-top:6px}
 #skills-box .dl{margin:0 0 10px}.skill-list{max-width:640px}
+#role-box .dl{margin:0 0 10px;max-width:680px}#role-box input{flex:1;min-width:0;padding:6px 9px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink);font:inherit}
+.role-p{margin:0}.role-bullets{margin:0;padding-left:20px}
+#pay-est{margin:-2px 0 10px;font-size:13px}#pay-est:empty{display:none}#pay-est b{color:var(--ink)}
 .chip{display:inline-block;padding:2px 9px;border-radius:99px;border:1px solid var(--line);font-size:13px;margin:0 6px 6px 0}
 .chip.good{color:var(--good);border-color:var(--good)}.chip.bad{color:var(--bad);border-color:var(--bad)}
 h2{font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--mute);margin:22px 0 6px}
@@ -475,6 +586,10 @@ dialog .actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}
 .toast .tt{font-weight:600}.toast .td{color:var(--mute);font-size:14px;margin-top:1px}
 .toast button{margin-left:auto;background:none;border:0;color:var(--mute);font-size:20px;line-height:1;cursor:pointer;padding:0 2px}
 #confirm-dlg{width:min(460px,92vw)}#confirm-dlg h3{margin:0}#confirm-dlg p{margin:8px 0 0;color:var(--mute)}
+#add-dlg{width:min(620px,94vw)}#add-dlg input[type=text],#add-dlg input[type=url]{width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink);font:inherit}
+#add-dlg .two{display:grid;grid-template-columns:1fr 1fr;gap:12px}#add-dlg .two>div{min-width:0}
+#add-dlg label.check{display:flex;gap:8px;align-items:center;font-weight:400;margin-top:14px}#add-dlg #add-error{margin-top:12px;color:var(--bad)}
+@media(max-width:560px){#add-dlg .two{grid-template-columns:1fr}}
 #prep-panel{display:none;width:440px;flex:none;border-left:1px solid var(--line);background:var(--panel);overflow:auto;padding:16px 18px}
 #prep-panel.open{display:block}
 @media (max-width:1150px){#prep-panel{position:fixed;right:0;top:0;bottom:0;width:min(480px,100vw);z-index:5;box-shadow:-8px 0 24px rgba(0,0,0,.35)}}
@@ -502,7 +617,7 @@ td.actions-cell .btn{display:block;width:100%;padding:4px 8px;margin:0 0 4px}td.
 }
 @media (max-width:760px){body{flex-direction:column;height:auto}nav{width:auto}#list{max-height:45vh}#filters{max-height:40vh}main{padding:52px 16px 16px}}   /* the list scrolls on its own; the filters can grow the sidebar */
 </style></head><body>
-<nav><header><div class="tabs"><a class="tab" id="tab-matches" href="#">Matches</a><a class="tab" id="tab-saved" href="#saved">Saved <span id="scount"></span></a><a class="tab" id="tab-prep" href="#prep">Interview Prep <span id="pcount"></span></a><a class="tab" id="tab-tracker" href="#tracker">Tracker <span id="tcount"></span></a></div><select id="report" aria-label="Report"></select><div class="searchrow"><input id="q" placeholder="Search title or company" aria-label="Search by title or company"><button class="btn" id="filter-btn" type="button" aria-expanded="false" aria-controls="filters" title="Filter by place, match score and salary"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 5h18l-7 8v6l-4 2v-8z"/></svg><span>Filters</span><span id="filter-badge" hidden></span></button></div><div id="chips" class="chips" hidden></div><div id="filters" hidden></div></header><div id="progress" hidden></div><div id="list"></div></nav>
+<nav><header><div class="tabs"><a class="tab" id="tab-matches" href="#">Matches</a><a class="tab" id="tab-saved" href="#saved">Saved <span id="scount"></span></a><a class="tab" id="tab-prep" href="#prep">Interview Prep <span id="pcount"></span></a><a class="tab" id="tab-tracker" href="#tracker">Tracker <span id="tcount"></span></a></div><select id="report" aria-label="Report"></select><div class="searchrow"><input id="q" placeholder="Search title or company" aria-label="Search by title or company"><button class="btn" id="filter-btn" type="button" aria-expanded="false" aria-controls="filters" title="Filter by place, match score and salary"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 5h18l-7 8v6l-4 2v-8z"/></svg><span>Filters</span><span id="filter-badge" hidden></span></button><select id="sort" aria-label="Sort jobs by" title="Sort the list"><option value="score">Best match</option><option value="salary">Highest salary</option><option value="posted">Newest posted</option></select></div><div id="chips" class="chips" hidden></div><div id="filters" hidden></div></header><div id="fetchbar" hidden></div><div id="modelbar" hidden></div><div id="progress" hidden></div><div id="list"></div></nav>
 <div id="toasts" role="status" aria-live="polite"></div>
 <dialog id="confirm-dlg" aria-labelledby="confirm-title" aria-describedby="confirm-msg"><h3 id="confirm-title"></h3><p id="confirm-msg"></p>
 <div class="actions"><button class="btn" id="confirm-cancel"></button><button class="btn" id="confirm-ok"></button></div></dialog>
@@ -516,8 +631,24 @@ td.actions-cell .btn{display:block;width:100%;padding:4px 8px;margin:0 0 4px}td.
 <div class="muted" style="margin-top:10px;font-size:12px">Up to 2,000 characters, plain text only. Control and invisible characters are removed.</div>
 <div class="actions"><button class="btn" value="cancel">Cancel</button><button class="btn primary" id="tailor-go" value="ok"></button></div>
 </form></dialog>
+<dialog id="add-dlg" aria-labelledby="add-heading"><form method="dialog" id="add-form">
+<h3 id="add-heading">Add a job by hand</h3>
+<div class="muted">For a posting on a site this program cannot read. Open it in your own browser, copy the whole description, and paste it below. The job goes into your Saved list and is scored like the others.</div>
+<label for="add-text">Job posting text</label>
+<textarea id="add-text" maxlength="40000" style="min-height:170px" placeholder="Paste the job description here"></textarea>
+<div class="muted count" id="add-text-n"></div>
+<label for="add-url">Link to the posting (optional)</label>
+<input id="add-url" type="url" maxlength="2000" placeholder="https://">
+<div class="two"><div><label for="add-title">Job title (optional)</label><input id="add-title" type="text" maxlength="200"></div>
+<div><label for="add-company">Company (optional)</label><input id="add-company" type="text" maxlength="200"></div></div>
+<label for="add-location">Location (optional)</label><input id="add-location" type="text" maxlength="200" placeholder="e.g. Austin, TX or Remote">
+<div class="muted" style="margin-top:6px;font-size:12px">Leave the title, company and location empty and Claude reads them from the text (a fraction of a cent). The link is only kept so you can open the posting; nothing is fetched from it.</div>
+<label class="check"><input type="checkbox" id="add-applied"> I already applied to this job (put it in my tracker)</label>
+<div id="add-error" class="bad" role="alert" hidden></div>
+<div class="actions"><button class="btn" value="cancel">Cancel</button><button class="btn primary" type="button" id="add-go">Add job</button></div>
+</form></dialog>
 <datalist id="round-kinds"><option value="Recruiter screen"><option value="Phone screen"><option value="Technical screen"><option value="Coding interview"><option value="System design"><option value="Take-home"><option value="Hiring manager"><option value="Behavioral"><option value="Onsite / final loop"></datalist>
-<div id="stage"><div id="topbar"><div id="account" hidden></div><div id="theme-toggle" role="group" aria-label="Color theme">
+<div id="stage"><div id="topbar"><div id="account" hidden></div><select id="model-sel" aria-label="Scoring model" title="Which model's scores you are looking at" hidden></select><button class="btn" id="add-btn" type="button" title="Add a job by pasting its text: for postings on sites this program cannot read"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span>Add a job</span></button><div id="theme-toggle" role="group" aria-label="Color theme">
 <button type="button" data-theme="dark" aria-pressed="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>Dark</button>
 <button type="button" data-theme="light" aria-pressed="false"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>Light</button></div></div>
 <button class="btn" id="trash-btn" aria-label="Trash" title="Trash: jobs you discarded"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg><span id="trash-count"></span></button>
@@ -620,7 +751,7 @@ async function loadReports(){
   await openReport(reportNames[0]||SAVED);
 }
 const reportCache=new Map();   // report name -> {jobs, fp}: the last answer for each list, so switching back to it is instant
-const fingerprint=list=>list.map(j=>[j.id,j.status,j.score,j.applied_at||"",j.pay,j.notes||""].join("|")).join("\n");   // what the list shows, much cheaper to compare than the descriptions
+const fingerprint=list=>list.map(j=>[j.id,j.status,j.score,j.applied_at||"",j.pay,j.notes||"",j.closed?1:0].join("|")).join("\n");   // what the list shows, much cheaper to compare than the descriptions
 function showJobs(list){jobs=list;if(!$("#filters").hidden)buildFilterPanel();syncFilterPanel();renderList();route()}
 async function openReport(name){
   reportName=name;$("#report").value=name;
@@ -668,6 +799,17 @@ const F={states:new Set(),countries:new Set(),modes:new Set(),remoteEverywhere:t
 const MODES=[["remote","Remote"],["hybrid","Hybrid"],["onsite","In person"],["unstated","Not stated"]];   // how the posting says the work is done
 const modesOf=j=>(j.modes&&j.modes.length)?j.modes:["unstated"];
 const isRemote=j=>modesOf(j).includes("remote")||/\bremote\b/i.test(j.location||"");
+const SORTS=["score","salary","posted"];let sortBy="score";   // the list's order: best match (the default), highest listed salary, or most recently posted
+try{const s=localStorage.getItem("sort");if(SORTS.includes(s))sortBy=s}catch(e){}
+const dayOf=j=>/^\d{4}-\d\d-\d\d/.test(j.posted||"")?j.posted.slice(0,10):"";   // "unknown" and anything not a date sort last
+const topPay=j=>j.pay_high??j.pay_low;                                              // the top of the posted range; jobs with no figure sort last
+function ordered(list){   // a stable copy in the chosen order; ties fall back to the match score
+  const byScore=(a,b)=>(b.score||0)-(a.score||0);
+  const cmp=sortBy==="salary"?(a,b)=>{const x=topPay(a),y=topPay(b);return x==null&&y==null?0:x==null?1:y==null?-1:y-x||(b.pay_low??0)-(a.pay_low??0)}
+    :sortBy==="posted"?(a,b)=>{const x=dayOf(a),y=dayOf(b);return x===y?0:!x?1:!y?-1:x<y?1:-1}
+    :null;
+  return cmp?[...list].sort((a,b)=>cmp(a,b)||byScore(a,b)):list;
+}
 const SCORE_STEPS=[[0,"Any"],[60,"60+"],[70,"70+"],[80,"80+"],[90,"90+"]];
 const SALARY_MAX=250000,SALARY_STEP=10000;
 let statesOpen=false;
@@ -734,7 +876,10 @@ function buildFilterPanel(){   // the choices come from what is in the list now:
         onclick:()=>{statesOpen=!statesOpen;buildFilterPanel();syncFilterPanel()}})]:[]))]:[]),
     ...(countryList.length||stateList.length?[el("label",{className:"check",htmlFor:"f-remote"},remoteBox,
       el("span",{textContent:"Always include remote jobs when filtering by place"}))]:[]),
+    el("div",{className:"fgroup"},el("div",{className:"fl"},el("span",{textContent:"Taken-down postings"})),el("div",{className:"muted",id:"check-text"}),
+      el("div",{className:"row"},el("button",{className:"btn",id:"check-btn",type:"button",textContent:"Check which are still open",onclick:startCheck}))),
     el("div",{className:"ffoot"},el("span",{id:"f-tally"}),el("button",{className:"link",type:"button",textContent:"Clear all",onclick:clearFilters})));
+  paintCheck();
 }
 function syncFilterPanel(){   // brings the open panel, the chips under the search box and the badge in line with F (without rebuilding the panel)
   document.querySelectorAll("#filters .seg button").forEach(b=>b.setAttribute("aria-pressed",String(+b.dataset.v===F.score)));
@@ -765,17 +910,17 @@ function showTally(){
 }
 function setFiltersOpen(open){
   $("#filters").hidden=!open;$("#filter-btn").setAttribute("aria-expanded",String(open));
-  if(open){buildFilterPanel();syncFilterPanel()}
+  if(open){buildFilterPanel();syncFilterPanel();loadCheck()}
 }
 function renderList(){
   const q=$("#q").value.toLowerCase().trim();
   const visible=jobs.filter(j=>!hiddenFromList(j));
-  const shown=visible.filter(j=>(j.title+" "+j.company).toLowerCase().includes(q)&&passes(j));
+  const shown=ordered(visible.filter(j=>(j.title+" "+j.company).toLowerCase().includes(q)&&passes(j)));
   const items=shown.map(j=>{
     const tier=j.score>=80?"hi":j.score>=60?"mid":"";
-    const a=el("a",{className:"item"+(["applied","rejected","withdrawn"].includes(j.status)?" done":""),href:"#"+encodeURIComponent(j.id)},
+    const a=el("a",{className:"item"+(["applied","rejected","withdrawn"].includes(j.status)||j.closed?" done":""),href:"#"+encodeURIComponent(j.id)},
       el("div",{className:"score "+tier,textContent:j.score}),
-      el("div",{},el("div",{className:"t",textContent:j.title}),el("div",{className:"c",textContent:j.company+" · "+(j.location||"")+modeNote(j)+(j.applied_at?" · ✓ applied":"")+(j.status==="saved"?" · ★ saved":"")})));
+      el("div",{},el("div",{className:"t",textContent:j.title}),el("div",{className:"c",textContent:j.company+" · "+(j.location||"")+modeNote(j)+(j.applied_at?" · ✓ applied":"")+(j.status==="saved"?" · ★ saved":"")+(j.closed?" · ✕ taken down":"")})));
     a.dataset.id=j.id;return a});
   const filtering=!!q||activeGroups()>0;
   const none=el("div",{className:"nomatch"},el("div",{textContent:"No jobs match these filters."}),
@@ -799,6 +944,52 @@ function saveButton(j){   // the bookmark in the posting's top-right corner: sav
   b.innerHTML=BOOKMARK;   // fixed markup of our own, no job text in it
   b.setAttribute("aria-label",b.title);
   return b;
+}
+const checkAsked=new Set();
+const CHECKED_FRESH=20*3600;   // seconds: a posting asked about more recently than this is not asked about again (liveness.RECHECK_AFTER)
+function paintClosed(j){   // a taken-down posting says so; one not asked about lately is asked about now, once, and says so if it is gone
+  const box=$("#closed-note");if(!box)return;
+  if(j.closed){
+    box.hidden=false;
+    box.replaceChildren(el("strong",{textContent:"Taken down. "}),el("span",{textContent:"The employer's site no longer lists this posting"+(j.checked?" (checked "+new Date(j.checked*1000).toLocaleDateString([],{month:"short",day:"numeric"})+")":"")+". It is left out of your matches and is not scored; a job you saved stays in your Saved list."}));
+    return;
+  }
+  box.hidden=true;box.replaceChildren();
+  if(!j.can_check||checkAsked.has(j.id)||(j.checked&&Date.now()/1000-j.checked<CHECKED_FRESH))return;
+  checkAsked.add(j.id);
+  post("/api/jobs/check",{id:j.id}).then(r=>{
+    j.checked=r.checked;
+    if(r.state!=="closed")return;
+    j.closed=true;reportCache.clear();renderList();
+    if(decodeURIComponent(location.hash.slice(1))===j.id)paintClosed(j);
+    loadCheck();
+  }).catch(e=>console.warn("Could not check whether the posting is still open",e));   // a check that could not be made is not worth an error
+}
+let checkInfo=null,checkTimer=0,checkShown=null;   // what /api/jobs/check-status said last: whether a check of your jobs is going, and how many are known to be gone
+function paintCheck(){
+  const text=$("#check-text"),btn=$("#check-btn");if(!text||!btn)return;
+  const c=checkInfo;
+  if(!c){text.textContent="";btn.disabled=true;return}
+  const res=c.result&&!c.result.error?" Just now: "+c.result.closed+" taken down, "+c.result.open+" still open"+(c.result.unknown?", "+c.result.unknown+" could not be told":"")+".":"";
+  const last=c.last?" Last checked "+new Date(c.last*1000).toLocaleString([],{dateStyle:"medium",timeStyle:"short"})+".":"";
+  text.textContent=c.running?"Checking with the employers' sites: "+c.done+" of "+c.total+" requests."
+    :(c.result&&c.result.error?c.result.error+" ":"")+(c.closed?c.closed+" of your jobs have been found taken down. They are left out of your matches and are not scored.":"None of your jobs are known to be taken down.")+res+(c.due?" "+c.due+" can be checked now.":"")+last;
+  btn.disabled=c.running||!c.due;
+  btn.title=c.due?"Ask each employer's site whether these jobs are still listed (Workday, Greenhouse, Ashby, Lever and a few more can be asked; the rest cannot)":"Everything that can be checked was checked in the last day";
+}
+async function loadCheck(first){   // `first`: on page load, when what an earlier check found is already in the lists
+  clearTimeout(checkTimer);
+  try{checkInfo=await api("/api/jobs/check-status")}catch(e){return}
+  paintCheck();
+  if(first&&!checkInfo.running){checkShown=JSON.stringify(checkInfo.result);return}
+  if(checkInfo.running)checkTimer=setTimeout(loadCheck,2500);
+  else if(checkInfo.result&&checkInfo.result.closed!==undefined&&JSON.stringify(checkInfo.result)!==checkShown){   // a check just ended: the lists no longer show what it found gone
+    checkShown=JSON.stringify(checkInfo.result);reportCache.clear();await Promise.all([reloadJobs(),refreshSaved()]);
+  }
+}
+async function startCheck(){
+  try{checkInfo=await post("/api/jobs/check-all",{});paintCheck();loadCheck()}
+  catch(e){fail("Couldn't start the check",e)}
 }
 const askedFor=new Set(),reformatTried=new Set();
 function restoreFormatting(j){   // a posting stored as plain text gets its headings and bullets back, fetched once from its board
@@ -840,18 +1031,21 @@ function route(){
   buttons.append(el("button",{className:"btn",id:"skills-btn",textContent:SKILLS_LABEL,
     title:"A list of the skills on your profile that this posting asks for, ready to copy into the application. Uses Claude once (a fraction of a cent).",
     onclick:()=>skillsFor(j)}));
+  buttons.append(el("button",{className:"btn",id:"role-btn",textContent:ROLE_LABEL,
+    title:"A description of your most recent job (or another company you name), worded to fit this posting, ready to paste into the application. Uses Claude once (a few cents).",
+    onclick:()=>roleFor(j,(roleState[j.id]||{}).employer)}));
   buttons.append(j.status==="skipped"
     ?el("button",{className:"btn on",textContent:"Restore from trash",title:"Put this job back in your lists and future reports",onclick:()=>setStatus(j,"new")})
     :el("button",{className:"btn",textContent:"Discard",title:"Move this job to the trash (the trash icon, top left). It stays out of future reports until you restore it.",onclick:()=>setStatus(j,"skipped")}));
   const card=el("div",{className:"card"},saveButton(j),
-    el("h1",{textContent:j.title}),el("p",{className:"sub",textContent:j.company+(meta?"  ·  "+meta:"")}),
+    el("h1",{textContent:j.title}),el("p",{className:"sub",textContent:j.company+(meta?"  ·  "+meta:"")}),el("div",{id:"pay-est",className:"muted"}),el("div",{id:"closed-note",className:"closed-note",hidden:true}),
     el("div",{},el("span",{className:"verdict "+(j.verdict||""),textContent:(j.verdict||"")+" "+j.score}),el("span",{textContent:j.reason||""})),
-    buttons,note,el("div",{id:"skills-box"}),
+    buttons,note,el("div",{id:"skills-box"}),el("div",{id:"role-box"}),
     ...list("Matched",j.matched,"good"),...list("Missing required",j.missing_required,"bad"),...list("Dealbreakers",j.dealbreakers,"bad"),
     ...(j.resume_angle?[el("h2",{textContent:"Resume angle"}),el("div",{textContent:j.resume_angle})]:[]),
     el("h2",{textContent:"Posting"}),
     el("div",{id:"desc"},...(j.description?markdown(j.description):[el("p",{textContent:"No stored description. Use the button above to read the original posting."})])));
-  $("#main").replaceChildren(card);$("#main").scrollTop=0;paintDocs(j.id);paintSkills(j.id);
+  $("#main").replaceChildren(card);$("#main").scrollTop=0;paintDocs(j.id);paintSkills(j.id);paintRole(j.id);paintPayEst(j);paintClosed(j);
   restoreFormatting(j);
   if(reportName===PREP&&prepJobId!==j.id&&!prepStreaming)openPrep(j,false);   // from the Interview Prep list, show its saved prep
 }
@@ -975,7 +1169,117 @@ async function skillsFor(j){
   catch(e){fail("Couldn't make your skills list",e);skillsState[j.id]={message:"That didn't finish. "+friendly(e)}}
   paintSkills(j.id);
 }
+function openAdd(){   // the box for adding a job by pasting its text
+  for(const id of ["text","url","title","company","location"])$("#add-"+id).value="";
+  $("#add-applied").checked=false;$("#add-error").hidden=true;$("#add-go").disabled=false;$("#add-go").textContent="Add job";
+  $("#add-text-n").textContent="";
+  $("#add-form").onsubmit=e=>e.preventDefault();   // Enter inside a field must not close the box
+  $("#add-dlg").showModal();$("#add-text").focus();
+}
+async function addJob(){
+  const go=$("#add-go"),err=$("#add-error");
+  const body={text:$("#add-text").value,url:$("#add-url").value.trim(),title:$("#add-title").value.trim(),company:$("#add-company").value.trim(),
+    location:$("#add-location").value.trim(),applied:$("#add-applied").checked};
+  err.hidden=true;go.disabled=true;go.textContent="Adding…";
+  let r;
+  try{r=await post("/api/jobs/add",body)}
+  catch(e){err.textContent=friendly(e);err.hidden=false;go.disabled=false;go.textContent="Add job";return}   // the box stays open with what was typed
+  $("#add-dlg").close();
+  reportCache.clear();payEst[r.id]=undefined;
+  const what=r.title+" at "+r.company;
+  toast(r.duplicate?"You already have this job":body.applied?"Added to your tracker":"Added to your Saved list",
+    r.duplicate?what:what+(r.scored?" (scored)":r.note?". "+r.note:""),"ok");
+  await Promise.all([refreshSaved(),refreshTracker()]);
+  if(body.applied&&!r.duplicate){location.hash="#tracker";return}
+  await openReport(SAVED);location.hash="#"+encodeURIComponent(r.id);
+}
+const payEst={};   // job id -> the estimate the server gave (null while it is being asked)
+function paintPayEst(j){   // a job that states no pay gets an estimate from the Bureau of Labor Statistics wage survey, labelled as one
+  const box=$("#pay-est");if(!box)return;
+  box.replaceChildren();
+  if(j.pay_low!=null||j.pay_high!=null)return;   // the posting states its pay (the stored figures, not the text shown for them)
+  const e=payEst[j.id];
+  if(e===undefined){
+    payEst[j.id]=null;
+    api("/api/payestimate/"+encodeURIComponent(j.id)).then(r=>{
+      if(r&&(r.ok||r.reason==="no_occupation"||r.reason==="no_data"||r.reason==="has_pay"))payEst[j.id]=r;else delete payEst[j.id];   // a busy BLS is asked again next time
+      if(lastJob===j.id)paintPayEst(j);
+    }).catch(()=>{delete payEst[j.id]});
+    return;
+  }
+  if(!e||!e.ok)return;
+  const money=n=>"$"+Number(n).toLocaleString("en-US");
+  const who={entry:"entry-level",senior:"senior"}[e.level]||"typical";
+  box.append(el("b",{textContent:"Estimated base pay "+money(e.low)+" – "+money(e.high)+" a year"}),
+    el("span",{textContent:"  ·  not from the posting. U.S. Bureau of Labor Statistics "+e.year+": "+who+" pay ("+e.band+") for "+e.occupation+" in "+e.area+"."}));
+}
+const ROLE_LABEL="Role description";
+const roleState={};   // job id -> {running, width, j, employer, data, message}; kept so the text is still there when you come back to the job
+function paintRole(id){
+  const btn=$("#role-btn"),box=$("#role-box");
+  if(!btn||decodeURIComponent(location.hash.slice(1))!==id)return;   // some other job is on screen
+  const st=roleState[id]||{};
+  btn.disabled=!!st.running;
+  if(st.running){btn.style.minWidth=st.width+"px";btn.replaceChildren(el("span",{className:"spinner"}));btn.setAttribute("aria-label","Working")}
+  else{btn.textContent=ROLE_LABEL;btn.style.minWidth="";btn.removeAttribute("aria-label")}
+  const d=st.data;
+  if(!d){box.replaceChildren(...(st.message?[el("div",{className:"muted",style:"margin:0 0 8px",textContent:st.message})]:[]));return}
+  const copier=(label,text)=>{
+    const b=el("button",{className:"btn",textContent:label});
+    b.onclick=async()=>{
+      try{await navigator.clipboard.writeText(text);b.textContent="Copied"}catch(e){b.textContent="Select the text and copy it"}
+      setTimeout(()=>{b.textContent=label},2000);
+    };
+    return b;
+  };
+  const other=el("input",{placeholder:"Another company? Leave blank for your most recent job",maxLength:80,value:st.employer||"",ariaLabel:"Company to describe"});
+  other.oninput=()=>{st.employer=other.value};
+  other.onkeydown=e=>{if(e.key==="Enter")roleFor(st.j,other.value)};
+  box.replaceChildren(el("div",{className:"dl"},
+    el("div",{className:"dl-row"},el("span",{className:"dl-label",textContent:[d.title,d.company,d.dates].filter(Boolean).join(" · ")||"Role description"})),
+    ...(d.paragraph?[el("p",{className:"role-p",textContent:d.paragraph}),el("div",{className:"dl-row"},copier("Copy paragraph",d.paragraph))]:[]),
+    ...(d.bullets.length?[el("ul",{className:"role-bullets"},...d.bullets.map(b=>el("li",{textContent:b}))),
+      el("div",{className:"dl-row"},copier("Copy bullets",d.bullets.map(b=>"- "+b).join("\n")))]:[]),
+    el("div",{className:"dl-row"},other,el("button",{className:"btn",textContent:"Write again",title:"Write it again, for the company in the box (blank: your most recent job)",
+      onclick:()=>roleFor(st.j,other.value)}))));
+}
+async function roleFor(j,employer){
+  const btn=$("#role-btn"),old=roleState[j.id]||{};
+  roleState[j.id]={...old,j,employer:employer||"",running:true,width:btn?btn.offsetWidth:70,message:""};paintRole(j.id);
+  try{roleState[j.id]={j,employer:employer||"",data:await post("/api/roledesc",{id:j.id,employer:employer||""})}}
+  catch(e){fail("Couldn't write the role description",e);roleState[j.id]={...old,j,employer:employer||"",running:false,message:"That didn't finish. "+friendly(e)}}
+  paintRole(j.id);
+}
 async function reloadJobs(){if(reportName)await openReport(reportName)}
+const SCORE_FIRST=100;   // the bar offers to score this many first, since a model that has scored nothing yet has all of them to do
+let modelInfo=null;   // the scoring models you can look at, which one you are looking at, and how many of your jobs it has not scored
+const modelLabel=id=>((modelInfo&&modelInfo.models.find(m=>m.id===id))||{}).label||id;
+function paintModels(){
+  const m=modelInfo,sel=$("#model-sel"),bar=$("#modelbar");
+  if(!m||!m.choice){sel.hidden=true;bar.hidden=true;return}   // one model only: there is nothing to choose
+  sel.hidden=false;
+  sel.replaceChildren(...m.models.map(x=>el("option",{value:x.id,textContent:x.label+(x.scored?" · "+x.scored+" scored":"")})));
+  sel.value=m.active;
+  const name=modelLabel(m.active);
+  if(!m.waiting){bar.hidden=true;return}
+  bar.replaceChildren(el("span",{textContent:name+" has not scored "+m.waiting+" of the "+m.looking_at+" jobs you are looking at, so they have no score here. "}),
+    el("button",{className:"btn",type:"button",textContent:m.waiting>SCORE_FIRST?"Score the best "+SCORE_FIRST:"Score them with "+name,title:"Read each one with this model, the ones the other model liked best first: uses its paid calls",onclick:()=>scoreWithModel(m.waiting>SCORE_FIRST?SCORE_FIRST:null)}),
+    ...(m.waiting>SCORE_FIRST?[el("button",{className:"btn",type:"button",textContent:"Score all "+m.waiting,title:"Read every one with this model: uses a paid call each",onclick:()=>scoreWithModel(null)})]:[]));
+  bar.hidden=false;
+}
+async function loadModels(){try{modelInfo=await api("/api/models")}catch(e){return}paintModels()}
+async function switchModel(id){
+  try{modelInfo=await post("/api/model",{model:id,score:false})}
+  catch(e){fail("Couldn't switch models",e);paintModels();return}
+  reportCache.clear();paintModels();
+  await Promise.all([reloadJobs(),refreshSaved(),refreshPrep(),refreshTracker()]);
+}
+async function scoreWithModel(limit){
+  const name=modelLabel(modelInfo.active),n=limit||modelInfo.waiting;
+  if(!(await ask({title:"Score "+n+" jobs with "+name+"?",message:"Each job is read once by "+name+", the ones the other model liked best first, and counts as a paid call. Larger models cost more per job. You can keep using the app while it works"+(limit?", and score the rest later":"")+".",confirmText:"Score "+n})))return;
+  try{const r=await post("/api/model",{model:modelInfo.active,score:true,...(limit?{limit}:{})});modelInfo=r;paintModels();if(r.run){paintProgress(r.run);pollProgress()}}
+  catch(e){fail("Couldn't start scoring",e)}
+}
 let lastScored=-1,pollTimer=0;
 function paintProgress(s){
   const box=$("#progress");
@@ -990,6 +1294,29 @@ function paintProgress(s){
   else{box.replaceChildren(...retry)}
   box.hidden=!box.childNodes.length;
 }
+let fetchTimer=0;
+function paintFetch(s){   // the "Fetch new postings" bar: there only when the server runs with `upkeep: manual`
+  const bar=$("#fetchbar");
+  bar.hidden=!s.manual;bar.className="";
+  if(!s.manual)return;
+  const r=s.result||{};
+  if(s.running){bar.replaceChildren(el("span",{className:"spinner"}),el("span",{textContent:"Fetching postings from every source. This takes a while; you can keep using the app."}));return}
+  const go=el("button",{className:"btn",textContent:"Fetch new postings",title:"Download the latest postings from every job source, then match them to your search",
+    onclick:async()=>{go.disabled=true;try{paintFetch(await post("/api/fetch",{}));pollFetch()}catch(e){fail("Couldn't start the fetch",e);go.disabled=false}}});
+  let note;
+  if(r.error){bar.className="err";note="The last fetch stopped: "+r.error}
+  else if(r.skipped){note="Another fetch is already running."}
+  else if(s.last){note="Last fetched "+new Date(s.last*1000).toLocaleString([],{dateStyle:"medium",timeStyle:"short"})+"."}
+  else note="Nothing has been fetched yet.";
+  bar.replaceChildren(go,el("span",{textContent:note}));
+}
+async function pollFetch(){
+  clearTimeout(fetchTimer);
+  let s;try{s=await api("/api/fetch/status")}catch(e){return}
+  paintFetch(s);
+  if(s.running){fetchTimer=setTimeout(pollFetch,4000)}
+  else if(s.result&&!s.result.error&&!s.result.skipped){pollProgress()}   // the fetch queued your search: show it finding and scoring
+}
 async function pollProgress(){
   clearTimeout(pollTimer);
   let s;try{s=await api("/api/matches/status")}catch(e){return}
@@ -997,7 +1324,7 @@ async function pollProgress(){
   if(lastScored>=0&&s.scored!==lastScored&&reportName===MATCHES&&!$("#q").value)await reloadJobs();   // a batch finished: show the new matches
   lastScored=s.scored;
   if(["queued","matching","scoring"].includes(s.state))pollTimer=setTimeout(pollProgress,3500);
-  else if(reportName===MATCHES&&s.scored>0&&!jobs.length)await reloadJobs();
+  else{loadModels();if(reportName===MATCHES&&s.scored>0&&!jobs.length)await reloadJobs()}   // a run ended: the count of unscored jobs changed
 }
 async function refreshTracker(){
   try{
@@ -1171,6 +1498,8 @@ function step(d){
 }
 addEventListener("hashchange",route);
 $("#q").addEventListener("input",renderList);
+$("#sort").value=sortBy;
+$("#sort").addEventListener("change",()=>{sortBy=$("#sort").value;try{localStorage.setItem("sort",sortBy)}catch(e){}renderList()});
 loadFilters();syncFilterPanel();
 $("#filter-btn").addEventListener("click",()=>setFiltersOpen($("#filters").hidden));
 addEventListener("keydown",e=>{if(e.target.matches("input,select")||e.ctrlKey||e.metaKey||e.altKey)return;
@@ -1185,6 +1514,10 @@ $("#tab-saved").addEventListener("click",async e=>{
   await openReport(SAVED);
   location.hash=jobs.length?"#"+encodeURIComponent(jobs[0].id):"#";   // open the best saved job; leaves the Tracker if it was showing
 });
+$("#add-btn").addEventListener("click",openAdd);
+$("#model-sel").addEventListener("change",()=>switchModel($("#model-sel").value));
+$("#add-go").addEventListener("click",addJob);
+$("#add-text").addEventListener("input",()=>{const n=$("#add-text").value.length;$("#add-text-n").textContent=n?n.toLocaleString("en-US")+" of 40,000 characters":""});
 $("#trash-btn").addEventListener("click",async()=>{
   if(reportName===TRASH&&location.hash!=="#tracker"&&reportNames.length){   // already in the trash: the icon goes back to the newest report
     await openReport(reportNames[0]);location.hash=lastJob?"#"+encodeURIComponent(lastJob):"#";return;
@@ -1212,7 +1545,9 @@ api("/api/me").then(me=>{
   box.hidden=false;
 }).catch(()=>{});
 refreshTracker();
-pollProgress();
+loadModels();
+pollProgress();pollFetch();
+loadCheck(true);
 loadReports().catch(e=>{console.error(e);$("#main").replaceChildren(el("div",{className:"empty"},"We couldn't load your jobs. "+friendly(e),
   el("div",{className:"row",style:"justify-content:center"},el("button",{className:"btn",textContent:"Try again",onclick:()=>location.reload()}))))});
 </script></body></html>
