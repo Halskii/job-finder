@@ -677,12 +677,16 @@ def payestimate(job_id: str, user: dict = Depends(current_user)):
 
 @app.get("/api/files/{name}")
 def download(name: str, user: dict = Depends(current_user)):
-    """A resume or cover letter this user had made. Only the exact files the program writes, only from their own folder."""
-    folder = (userdata.home(user["id"]) / "Optimized Resumes").resolve()
-    path = (folder / name).resolve()
-    if not FILE_NAME.match(name) or path.parent != folder or not path.is_file():
-        raise Problem(404, "That file does not exist. Make it again with the tailor button.", "not_found")
-    return FileResponse(path, media_type=MEDIA[path.suffix], filename=name)
+    """A resume or cover letter this user had made. Only the exact files the program writes, only from the folders it writes them to: the
+    person's own 'Optimized Resumes' folder, and the resume and cover letter folders named in config.yaml when there are any."""
+    home = userdata.home(user["id"])
+    folders = [(home / "Optimized Resumes").resolve()] + [tailor.output_folder(kind, home).resolve() for kind in ("resume", "cover_letter")]
+    if FILE_NAME.match(name):
+        for folder in dict.fromkeys(folders):
+            path = (folder / name).resolve()
+            if path.parent == folder and path.is_file():
+                return FileResponse(path, media_type=MEDIA[path.suffix], filename=name)
+    raise Problem(404, "That file does not exist. Make it again with the tailor button.", "not_found")
 
 
 def job_id_of(body: dict) -> str:

@@ -45,6 +45,7 @@ PHENOM_SITES = {
     "circlek": ("https://workwithus.circlek.com/global/en", "Circle K", "circlek"),    # worldwide: the location settings drop the rest
     # Not a retailer: a large employer on the same Phenom career site (its robots.txt blocks nothing the search uses).
     "disney": ("https://join.disneycareers.com/global/en", "Disney", "disney"),
+    "baesystems": ("https://jobs.baesystems.com/global/en", "BAE Systems", "baesystems"),    # worldwide: the location settings drop the rest
 }
 # (config key, label for the run log, name of the fetch function here): one line per retailer.
 RETAIL_SOURCES = [("homedepot", "Home Depot", "fetch_homedepot"),

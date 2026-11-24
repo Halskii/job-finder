@@ -2,6 +2,7 @@
 import json
 import tempfile
 import unittest
+from pathlib import Path
 import urllib.error
 import urllib.request
 from http.cookiejar import CookieJar
@@ -203,6 +204,26 @@ class TwoUsersTests(Base):
         self.assertEqual(self.as_("b", "GET", "/api/files/A_Person_resume.pdf")[0], 404)
         for name in ("..%2Fprofile.json", "..%5Csecret.md", "A_Person_resume.exe", "%2E%2E%2F%2E%2E%2Fweb.py", "notes.txt", "x" * 300 + ".pdf"):
             self.assertEqual(self.as_("a", "GET", "/api/files/" + name)[0], 404, name)
+
+    def test_files_can_also_be_downloaded_from_the_folders_named_in_config(self):
+        import tempfile
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as tmp:
+            resumes, letters = Path(tmp) / "resumes", Path(tmp) / "cover_letters"
+            resumes.mkdir()
+            letters.mkdir()
+            (resumes / "B_Role_Co_resume.pdf").write_bytes(b"%PDF-1.4 resume")
+            (letters / "B_Role_Co_cover_letter.docx").write_bytes(b"PK letter")
+            (Path(tmp) / "elsewhere.pdf").write_bytes(b"%PDF-1.4 not in a folder the program writes to")
+            cfg = {"resume_folder": str(resumes), "cover_letter_folder": str(letters)}
+            real = web.tailor.config_value
+            with mock.patch.object(web.tailor, "config_value", lambda key, default=None: cfg[key] if key in cfg else real(key, default)):
+                self.assertEqual(self.as_("a", "GET", "/api/files/B_Role_Co_resume.pdf")[0], 200)
+                self.assertEqual(self.as_("a", "GET", "/api/files/B_Role_Co_cover_letter.docx")[0], 200)
+                self.assertEqual(self.as_("a", "GET", "/api/files/A_Person_resume.pdf")[0], 200)        # the old folder still works
+                self.assertEqual(self.as_("a", "GET", "/api/files/elsewhere.pdf")[0], 404)
+                self.assertEqual(self.as_("a", "GET", "/api/files/..%2Felsewhere.pdf")[0], 404)
+            self.assertEqual(self.as_("a", "GET", "/api/files/B_Role_Co_resume.pdf")[0], 404)           # without the setting it is not served
 
     def test_a_connection_asked_for_with_a_forged_user_still_cannot_read_another_users_rows(self):
         conn = self.site.db(self.b_id)

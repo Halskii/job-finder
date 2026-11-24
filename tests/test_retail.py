@@ -295,5 +295,16 @@ def fake_jobs():
     return sources.Job("lowes:JR-1", "lowes", "Lowe's", "Software Engineer", "Charlotte, North Carolina, United States", "https://talent.lowes.com/x")
 
 
+class PhenomRows(unittest.TestCase):
+    def test_every_phenom_site_is_wired_up_by_its_row(self):
+        for key, (base, company, prefix) in rs.PHENOM_SITES.items():
+            self.assertTrue(base.startswith("https://"), key)
+            self.assertEqual((prefix, callable(getattr(rs, f"fetch_{key}")), key in sources.DETAIL_FILLERS), (key, True, True), key)
+            self.assertIn((key, company, f"fetch_{key}"), rs.RETAIL_SOURCES)
+
+    def test_bae_systems_is_one_of_them(self):
+        self.assertEqual(rs.PHENOM_SITES["baesystems"], ("https://jobs.baesystems.com/global/en", "BAE Systems", "baesystems"))
+
+
 if __name__ == "__main__":
     unittest.main()

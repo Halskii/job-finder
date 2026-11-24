@@ -31,6 +31,10 @@ request_delay: 0.4        # seconds between HTTP requests (be polite to job boar
 
 profile_model: claude-sonnet-5-5   # used by `main.py profile` to read resume.pdf
 tailor_model: claude-fable-5-1     # used by the viewer's "Tailor resume" and "Cover letter" buttons
+# Where the Tailor resume and Cover letter buttons save their PDF and Word files. Leave these out to use each person's own Optimized Resumes folder (right for a server).
+# Name folders only for a copy that one person uses: everyone who signs in shares them. A folder that does not exist yet is made.
+# resume_folder: C:/Users/you/Downloads/resumes
+# cover_letter_folder: C:/Users/you/Downloads/cover_letters
 onboard_model: claude-haiku-5-5    # used by the profile page to suggest job titles from a resume (the facts come from profile_model)
 tips_model: claude-haiku-5-5       # used by the "Interview prep" button on a job's page
 tips_web_search: true              # let it search the web for what candidates report (about 1 cent per search, plus the extra tokens)

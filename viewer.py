@@ -1072,11 +1072,11 @@ const DOCS={   // the two documents the buttons make; each has its own button, r
     start:j=>(j.resume_angle||"").trim(),   // the box opens with the resume angle scoring found for this posting; the person can change or clear it
     hint:"Filled in with the resume angle from this job's score: what to emphasize for this posting. Change it, replace it, or clear the box to use the defaults.",
     placeholder:"e.g. Lead with my Kubernetes work and keep the skills section short",
-    tip:"Uses Claude (Fable 5.1) to rewrite your resume for this posting, saved as a PDF and an editable Word file in the Optimized Resumes folder. Costs a few cents."},
+    tip:"Uses Claude (Fable 5.1) to rewrite your resume for this posting, saved as a PDF and an editable Word file in your resumes folder (Optimized Resumes, unless config.yaml names another). Costs a few cents."},
   letter:{label:"Cover letter",what:"cover letter",btn:"letter-btn",path:"/api/letter",go:"Write",
     start:()=>"",
     placeholder:"e.g. Mention that I am open to relocating, and keep it under 250 words",
-    tip:"Uses Claude (Fable 5.1) to write a cover letter for this posting, saved as a PDF and an editable Word file in the Optimized Resumes folder. Costs a few cents."}};
+    tip:"Uses Claude (Fable 5.1) to write a cover letter for this posting, saved as a PDF and an editable Word file in your resumes folder (Optimized Resumes, unless config.yaml names another). Costs a few cents."}};
 const REQUEST_MAX=2000;
 const BAD_CHARS=/[\u0000-\u0008\u000B-\u001F\u007F-\u009F\u00AD\u200B-\u200F\u2028-\u202E\u2060-\u206F\uE000-\uF8FF\uFEFF\uFFF0-\uFFFF]/g;   // control, invisible, direction-override, private-use
 function wireRequestBox(id){

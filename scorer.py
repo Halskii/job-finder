@@ -49,9 +49,9 @@ def _extract_json(text: str) -> dict:
     return json.loads(text[start:end + 1])
 
 
-def score_job(client, model: str, profile: dict, job, min_pay: int, resume_text: str = "") -> dict:
-    """Ask Claude how well one stored job (a database row) fits the profile. Returns the parsed answer plus the token
-    counts under `_in` / `_out`, which the caller uses to estimate cost."""
+def prompt_parts(profile: dict, job, min_pay: int, resume_text: str = "") -> tuple[str, str]:
+    """The user message in two pieces: what is the same for every job of this candidate (profile, resume, minimum pay) and the posting.
+    Joined they are exactly the one message `score_job` has always sent, so splitting them changes nothing the model reads."""
     description = (job["description"] or "")[:7000]   # long postings are cut to keep each call cheap
     unit = job["pay_unit"] if "pay_unit" in job.keys() else "year"   # a stored job is a row; tests pass a dict
     pay = sources.format_pay(job["pay_min"], job["pay_max"], unit) or "unknown"
@@ -60,21 +60,59 @@ def score_job(client, model: str, profile: dict, job, min_pay: int, resume_text:
         pay += f" (about {' - '.join(yearly)} a year full-time)"
     resume_block = (f"CANDIDATE RESUME (context only; if it conflicts with the profile, the profile wins):\n{resume_text}\n\n"
                     if resume_text else "")
-    user = (
+    shared = (
         f"CANDIDATE PROFILE (verified):\n{json.dumps(profile, indent=1)}\n\n"
         f"{resume_block}"
         f"CANDIDATE MINIMUM PAY: ${min_pay:,} per year\n\n"
+    )
+    posting = (
         f"JOB POSTING\nCompany: {job['company']}\nTitle: {job['title']}\nLocation: {job['location']}\n"
         f"Listed pay: {pay}\nPosted: {job['posted'] or 'unknown'}\n\n{description}"
     )
-    msg = client.messages.create(model=model, system=SYSTEM, messages=[{"role": "user", "content": user}], **request_options(model))
+    return shared, posting
+
+
+def build_request(model: str, profile: dict, job, min_pay: int, resume_text: str = "", cache: str | None = None) -> dict:
+    """The arguments of one scoring call. With `cache` ("5m" or "1h") the part that is the same for every job of this candidate is marked
+    for prompt caching, so the next calls read it back at a fraction of the price instead of paying for it again. Without it the message is
+    one plain string, as before."""
+    shared, posting = prompt_parts(profile, job, min_pay, resume_text)
+    if cache:
+        marker = {"type": "ephemeral", **({"ttl": "1h"} if cache == "1h" else {})}
+        content = [{"type": "text", "text": shared, "cache_control": marker}, {"type": "text", "text": posting}]
+    else:
+        content = shared + posting
+    return {"model": model, "system": SYSTEM, "messages": [{"role": "user", "content": content}], **request_options(model)}
+
+
+def request_text(kw: dict) -> str:
+    """The user message of a request made by `build_request`, as one string whether or not it was split for caching."""
+    content = kw["messages"][0]["content"]
+    return content if isinstance(content, str) else "".join(b["text"] for b in content)
+
+
+def parse_reply(msg, model: str) -> dict:
+    """The score in a model's reply, with the token counts under `_in` (everything sent, cached or not) and `_out`, and what was read from
+    or written to the prompt cache under `_cache_read` / `_cache_write`. Raises ValueError when the reply holds no usable JSON."""
     data = _extract_json(reply_text(msg))
     usage = getattr(msg, "usage", None)
-    data["_in"] = int(getattr(usage, "input_tokens", 0) or 0)
+    read = int(getattr(usage, "cache_read_input_tokens", 0) or 0)
+    write = int(getattr(usage, "cache_creation_input_tokens", 0) or 0)
+    data["_in"] = int(getattr(usage, "input_tokens", 0) or 0) + read + write      # all of the prompt, so a later estimate is not fooled by caching
     data["_out"] = int(getattr(usage, "output_tokens", 0) or 0)
+    if read or write:
+        data["_cache_read"], data["_cache_write"] = read, write
     data["_model"] = model    # which model gave this score, so a later rescore can tell the jobs it has already done
     # Keep the answer usable even if the model strays from the format.
     data["fit_score"] = max(0, min(100, int(data.get("fit_score", 0))))
     if data.get("verdict") not in ("apply", "maybe", "skip"):
         data["verdict"] = "maybe" if data["fit_score"] >= 60 else "skip"
     return data
+
+
+def score_job(client, model: str, profile: dict, job, min_pay: int, resume_text: str = "", cache: str | None = None) -> dict:
+    """Ask Claude how well one stored job (a database row) fits the profile. Returns the parsed answer plus the token
+    counts under `_in` / `_out`, which the caller uses to estimate cost. `cache` ("5m" or "1h") turns on prompt caching of the
+    candidate's profile and resume (see `build_request`); the live scoring leaves it off."""
+    msg = client.messages.create(**build_request(model, profile, job, min_pay, resume_text, cache))
+    return parse_reply(msg, model)

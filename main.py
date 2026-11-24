@@ -771,7 +771,7 @@ def cmd_usage(args, cfg, profile, conn) -> None:
 def cmd_rescore(args, cfg, profile, conn) -> None:
     """Admin only (it is a command on the server, with no web page): score one person's jobs again with the model now in config.yaml."""
     import rescore
-    code = rescore.run(args.user, redo_all=args.all, limit=args.limit, dry_run=args.dry_run, workers=args.workers, log=log)
+    code = rescore.run(args.user, redo_all=args.all, limit=args.limit, dry_run=args.dry_run, workers=args.workers, batch=args.batch, log=log)
     if code:
         sys.exit(code)
 
@@ -814,6 +814,7 @@ def main() -> None:
     rs.add_argument("--all", action="store_true", help="also jobs already scored with this model")
     rs.add_argument("--limit", type=int, help="only the best-scoring N jobs this time (run it again for the next ones)")
     rs.add_argument("--workers", type=int, help="calls made at the same time (default: scoring.workers in config.yaml)")
+    rs.add_argument("--batch", action="store_true", help="use the Batch API: half the price, answers in minutes to hours. Safe to stop; run it again to collect")
     m = sub.add_parser("mark", help="update a job's status in the tracker")
     m.add_argument("id", help="job id or any unique fragment of it")
     m.add_argument("status")

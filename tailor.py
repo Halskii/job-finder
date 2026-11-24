@@ -1,4 +1,4 @@
-"""Tailor your resume to one stored job and write a cover letter for it, both saved as PDFs (and as editable Word files) in 'Optimized Resumes/'.
+"""Tailor your resume to one stored job and write a cover letter for it, both saved as PDFs (and as editable Word files) in 'Optimized Resumes/' (or the folders named by `resume_folder` and `cover_letter_folder` in config.yaml).
 
 One Claude call returns the rewritten resume and the letter as JSON; this module checks it, lays it out as HTML, and
 prints the HTML to PDF with headless Edge or Chrome, then writes the same content as .docx with python-docx. Your phone
@@ -94,6 +94,14 @@ def config_value(key: str, default: str) -> str:
     """One top-level setting from config.yaml, or the default when the file or the setting is missing."""
     cfg_file = ROOT / "config.yaml"
     return ((yaml.safe_load(cfg_file.read_text(encoding="utf-8")) if cfg_file.exists() else None) or {}).get(key, default)
+
+
+def output_folder(kind: str, home: Path) -> Path:
+    """Where the tailored resumes (kind "resume") or cover letters ("cover_letter") are written: the folder named by `resume_folder` or
+    `cover_letter_folder` in config.yaml, or else the person's own 'Optimized Resumes' folder. The settings are for a copy only one person
+    uses (the folders are shared by everyone who signs in); a server leaves them out."""
+    configured = config_value("resume_folder" if kind == "resume" else "cover_letter_folder", None)
+    return Path(str(configured)).expanduser() if configured else home / "Optimized Resumes"
 
 
 def short(text: str, limit: int = 40) -> str:
@@ -432,11 +440,11 @@ def tailor_resume(conn, job_id: str, out_dir: Path | None = None, client=None, r
     """Write <Name>_<Role>_<Company>_resume.pdf for a stored job, plus the same resume as an editable .docx file.
     Returns {"files": [pdf], "word_files": [docx], "folder": str, "pages": {"resume": n}, "tokens": {"in": n, "out": n}}."""
     home, row, profile, resume_text, name, contact = _prepare(conn, job_id, home)
-    out_dir = out_dir or home / "Optimized Resumes"
+    out_dir = out_dir or output_folder("resume", home)
     client = client or make_client()
     data, tok_in, tok_out = ask(client, config_value("tailor_model", MODEL), RESUME_SYSTEM, profile, resume_text, row, "RESUME", request)
     check_resume(data)
-    out_dir.mkdir(exist_ok=True)
+    out_dir.mkdir(parents=True, exist_ok=True)
     stem, _ = _stem(name, row, data)
     pdf, doc = out_dir / f"{stem}_resume.pdf", out_dir / f"{stem}_resume.docx"
     pages = write_one_page(lambda s: resume_html(name, contact, data["resume"], s), RESUME_SIZES, pdf)
@@ -448,11 +456,11 @@ def write_cover_letter(conn, job_id: str, out_dir: Path | None = None, client=No
     """Write <Name>_<Role>_<Company>_cover_letter.pdf for a stored job, plus the same letter as an editable .docx file.
     Returns {"files": [pdf], "word_files": [docx], "folder": str, "pages": {"cover_letter": n}, "tokens": {"in": n, "out": n}}."""
     home, row, profile, resume_text, name, contact = _prepare(conn, job_id, home)
-    out_dir = out_dir or home / "Optimized Resumes"
+    out_dir = out_dir or output_folder("cover_letter", home)
     client = client or make_client()
     data, tok_in, tok_out = ask(client, config_value("tailor_model", MODEL), LETTER_SYSTEM, profile, resume_text, row, "COVER LETTER", request)
     check_letter(data)
-    out_dir.mkdir(exist_ok=True)
+    out_dir.mkdir(parents=True, exist_ok=True)
     stem, company = _stem(name, row, data)
     paragraphs = data["cover_letter"]["paragraphs"]
     pdf, doc = out_dir / f"{stem}_cover_letter.pdf", out_dir / f"{stem}_cover_letter.docx"

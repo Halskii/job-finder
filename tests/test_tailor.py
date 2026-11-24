@@ -161,7 +161,7 @@ class TailorJobTests(unittest.TestCase):
                 mock.patch.object(main, "read_resume_file", return_value=raw), \
                 mock.patch.object(tailor, "html_to_pdf", lambda page, out: self.written.append((out.name, page))), \
                 mock.patch.object(tailor, "page_count", return_value=pages):
-            return make(self.conn, job_id, out_dir=self.root / "Optimized Resumes", client=client, home=self.root, **kw)
+            return make(self.conn, job_id, out_dir=kw.pop("out_dir", self.root / "Optimized Resumes"), client=client, home=self.root, **kw)
 
     def resume(self, client, **kw):
         return self.run_job(tailor.tailor_resume, client, **kw)
@@ -179,6 +179,29 @@ class TailorJobTests(unittest.TestCase):
         self.assertEqual((len(calls), calls[0]["model"], calls[0]["system"]), (1, "claude-fable-5-1", tailor.RESUME_SYSTEM))
         self.assertIn("jh@example.com", dict(self.written)[result["files"][0]])        # contact line copied from the resume file
         self.assertFalse(list((self.root / "Optimized Resumes").glob("*cover_letter*")))
+
+    def test_the_folders_come_from_config_or_else_the_persons_own_folder(self):
+        with mock.patch.object(tailor, "config_value", lambda key, default=None: default):
+            self.assertEqual(tailor.output_folder("resume", self.root), self.root / "Optimized Resumes")
+            self.assertEqual(tailor.output_folder("cover_letter", self.root), self.root / "Optimized Resumes")
+        cfg = {"resume_folder": str(self.root / "dl" / "resumes"), "cover_letter_folder": str(self.root / "dl" / "cover_letters")}
+        with mock.patch.object(tailor, "config_value", lambda key, default=None: cfg.get(key, default)):
+            self.assertEqual(tailor.output_folder("resume", self.root), self.root / "dl" / "resumes")
+            self.assertEqual(tailor.output_folder("cover_letter", self.root), self.root / "dl" / "cover_letters")
+
+    def test_resumes_and_cover_letters_go_to_their_own_configured_folders_which_are_made_when_missing(self):
+        cfg = {"resume_folder": str(self.root / "dl" / "resumes"), "cover_letter_folder": str(self.root / "dl" / "cover_letters")}
+        real = tailor.config_value
+        with mock.patch.object(tailor, "config_value", lambda key, default=None: cfg[key] if key in cfg else real(key, default)):
+            resume = self.run_job(tailor.tailor_resume, fake_client(RESUME_ANSWER)[0], out_dir=None)
+            letter = self.run_job(tailor.write_cover_letter, fake_client(LETTER_ANSWER)[0], out_dir=None)
+        self.assertEqual(resume["folder"], cfg["resume_folder"])
+        self.assertEqual(letter["folder"], cfg["cover_letter_folder"])
+        self.assertEqual(sorted(p.name for p in (self.root / "dl" / "resumes").iterdir()),
+                         ["James_Hall_Software_and_AI_Engineer_CoreWeave_resume.docx"])      # the pdf is faked out by html_to_pdf here
+        self.assertEqual(sorted(p.name for p in (self.root / "dl" / "cover_letters").iterdir()),
+                         ["James_Hall_Software_and_AI_Engineer_CoreWeave_cover_letter.docx"])
+        self.assertFalse((self.root / "Optimized Resumes").exists())
 
     def test_the_cover_letter_button_writes_only_the_letter(self):
         client, calls = fake_client(LETTER_ANSWER)
