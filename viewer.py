@@ -160,7 +160,7 @@ def job_dict(r) -> dict:
         "resume_angle": a.get("resume_angle", ""), "url": safe_url(r["url"] or ""), "description": r["description"] or "",
         "status": r["status"], "notes": r["notes"] or "", "applied_at": r["applied_at"],
         "can_reformat": reformat.can_reformat(r["id"], r["formatted"]),
-        "closed": r.get("closed_at") is not None, "checked": r.get("checked_at"), "can_check": liveness.can_check(r["id"]),   # taken down by the employer (liveness.py)
+        "closed": r.get("closed_at") is not None, "checked": r.get("checked_at"), "can_check": liveness.can_check(r["id"], r.get("source") or ""),   # taken down by the employer (liveness.py)
     }
 
 

@@ -42,9 +42,13 @@ def wd_row(jid="wd:acme:1", url="https://acme.wd1.myworkdayjobs.com/en-US/Career
 class DecidingTests(unittest.TestCase):
     def test_which_sources_can_be_asked(self):
         for jid in ("gh:acme:1", "lv:acme:1", "ab:acme:1", "wd:acme:1", "rp:acme:1", "wk:acme:1", "bb:acme:1", "rc:acme:1", "pn:acme:1", "gm:acme:1"):
-            self.assertTrue(liveness.can_check(jid), jid)
-        for jid in ("jo:123", "sr:acme:1", "hm:acme:1", "usajobs:1", "apple:1", "manual:abc", "hn:5", "jb:1"):
-            self.assertFalse(liveness.can_check(jid), jid)
+            self.assertTrue(liveness.can_check(jid), jid)                       # by the source's own API
+        for jid, source in (("jo:123", "jooble"), ("hm:acme:1", "himalayas"), ("jb:1", "jobicy"), ("rm:1", "remotive"), ("wwr:1", "weworkremotely"),
+                            ("apple:1", "apple"), ("homedepot:1", "homedepot")):
+            self.assertTrue(liveness.can_check(jid, source), jid)               # by asking for the posting's own page
+        for jid, source in (("sr:acme:1", "smartrecruiters"), ("manual:abc", "manual"), ("hn:5", "hackernews"), ("usajobs:1", "usajobs"),
+                            ("tx:1", "texas_hhs"), ("az:1", "arizona"), ("ca:1", "california")):
+            self.assertFalse(liveness.can_check(jid, source), jid)              # never asked
 
     def test_a_job_missing_from_its_board_is_taken_down_and_the_others_are_open(self):
         with mock.patch.object(sources, "fetch_greenhouse", lambda slug: [job("gh:acme:1"), job("gh:acme:3")]):
@@ -76,6 +80,136 @@ class DecidingTests(unittest.TestCase):
         with mock.patch.dict(reformat.SINGLES, {"wd": mock.Mock(return_value="text")}) as fake:
             self.assertEqual(liveness.check_one(wd_row(url="https://elsewhere.example/job/1")), "unknown")
             fake["wd"].assert_not_called()
+
+
+class FakeResponse:
+    def __init__(self, status=200, text="", headers=None):
+        self.status_code, self.text, self.headers, self.closed = status, text, headers or {}, False
+
+    def close(self):
+        self.closed = True
+
+
+class FakeSession:
+    """Answers each address from a table of {url: FakeResponse or an exception}; an address not in the table is a 404. Remembers what was asked
+    and the redirect setting of each request."""
+    def __init__(self, table):
+        self.table, self.asked, self.follow = table, [], []
+
+    def get(self, url, **kw):
+        self.asked.append(url)
+        self.follow.append(kw.get("allow_redirects", True))
+        answer = self.table.get(url, FakeResponse(404))
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+
+def page_row(url, source="himalayas", jid="hm:acme:1"):
+    return {"id": jid, "source": source, "url": url, "title": "t", "company": "c"}
+
+
+class PageTests(unittest.TestCase):
+    """A source with no way to ask is asked for the posting's own page."""
+    def setUp(self):
+        liveness._robots.clear()
+        self.addCleanup(liveness._robots.clear)
+
+    def ask(self, table, row, robots="User-agent: *\nAllow: /\n"):
+        table = {"https://site.example/robots.txt": FakeResponse(200, robots) if robots is not None else FakeResponse(404), **table}
+        session = FakeSession(table)
+        with mock.patch.object(sources, "_session", lambda: session), mock.patch.object(liveness.time, "sleep"):
+            return liveness.check_page(row), session
+
+    def test_404_and_410_are_gone_a_page_that_loads_is_open_and_other_answers_tell_nothing(self):
+        url = "https://site.example/jobs/1"
+        for status, want in ((200, "open"), (404, "closed"), (410, "closed"), (403, "unknown"), (429, "unknown"), (500, "unknown")):
+            state, _ = self.ask({url: FakeResponse(status)}, page_row(url))
+            self.assertEqual(state, want, status)
+        state, _ = self.ask({url: requests.Timeout("slow")}, page_row(url))
+        self.assertEqual(state, "unknown")
+
+    def test_only_the_answer_is_read_not_the_page(self):
+        url = "https://site.example/jobs/1"
+        page = FakeResponse(200, "<html>big</html>")
+        _, session = self.ask({url: page}, page_row(url))
+        self.assertTrue(page.closed)
+
+    def test_a_page_robots_txt_disallows_is_never_requested(self):
+        url = "https://site.example/jobs/1"
+        state, session = self.ask({url: FakeResponse(404)}, page_row(url), robots="User-agent: *\nDisallow: /jobs/\n")
+        self.assertEqual(state, "unknown")
+        self.assertNotIn(url, session.asked)
+        state, session = self.ask({url: FakeResponse(404)}, page_row(url), robots="User-agent: job-finder\nDisallow: /\n")
+        self.assertEqual((state, url in session.asked), ("unknown", False))
+
+    def test_a_site_with_no_robots_txt_is_open_to_requests_but_one_that_cannot_be_read_is_not(self):
+        url = "https://site.example/jobs/1"
+        state, _ = self.ask({url: FakeResponse(404)}, page_row(url), robots=None)
+        self.assertEqual(state, "closed")
+        liveness._robots.clear()
+        session = FakeSession({"https://site.example/robots.txt": FakeResponse(503), url: FakeResponse(404)})
+        with mock.patch.object(sources, "_session", lambda: session):
+            self.assertEqual(liveness.check_page(page_row(url)), "unknown")
+        self.assertNotIn(url, session.asked)
+
+    def test_robots_txt_is_read_once_per_site_in_a_sweep(self):
+        a, b = "https://site.example/jobs/1", "https://site.example/jobs/2"
+        session = FakeSession({"https://site.example/robots.txt": FakeResponse(200, ""), a: FakeResponse(200), b: FakeResponse(404)})
+        rows = [page_row(a, jid="hm:a:1"), page_row(b, jid="hm:a:2")]
+        conn = mock.Mock()
+        with mock.patch.object(sources, "_session", lambda: session), mock.patch.object(liveness.time, "sleep"):
+            counts = liveness.sweep(conn, rows, delay=0)
+        self.assertEqual(session.asked.count("https://site.example/robots.txt"), 1)
+        self.assertEqual(counts, {"open": 1, "closed": 1, "unknown": 0})
+
+    def test_a_crawl_delay_is_waited_out(self):
+        url = "https://site.example/jobs/1"
+        session = FakeSession({"https://site.example/robots.txt": FakeResponse(200, "User-agent: *\nCrawl-delay: 5\n"), url: FakeResponse(200)})
+        with mock.patch.object(sources, "_session", lambda: session), mock.patch.object(liveness.time, "sleep") as sleep:
+            liveness.check_page(page_row(url))
+        sleep.assert_called_once_with(5 - liveness.DELAY)
+
+    def test_a_redirect_is_followed_within_the_site_only(self):
+        url = "https://site.example/jobs/1"
+        same = {url: FakeResponse(301, headers={"Location": "/jobs/1/"}), "https://site.example/jobs/1/": FakeResponse(200)}
+        self.assertEqual(self.ask(same, page_row(url))[0], "open")
+        gone = {url: FakeResponse(302, headers={"Location": "/jobs/1/"}), "https://site.example/jobs/1/": FakeResponse(404)}
+        self.assertEqual(self.ask(gone, page_row(url))[0], "closed")
+        away = {url: FakeResponse(302, headers={"Location": "https://other.example/x"})}
+        state, session = self.ask(away, page_row(url))
+        self.assertEqual(state, "unknown")
+        self.assertNotIn("https://other.example/x", session.asked)
+        loop = {url: FakeResponse(302, headers={"Location": url})}
+        self.assertEqual(self.ask(loop, page_row(url))[0], "unknown")          # a redirect that never ends is no answer
+
+    def test_a_retailer_whose_closed_jobs_redirect_is_not_followed_and_a_redirect_means_gone(self):
+        import retail_sitemap
+        key = next(k for k, site in retail_sitemap.SITES.items() if not site.follow)
+        url = "https://site.example/jobs/1"
+        target = "https://site.example/search"
+        table = {url: FakeResponse(302, headers={"Location": target})}
+        state, session = self.ask(table, page_row(url, source=key, jid=f"{key}:1"))
+        self.assertEqual(state, "closed")
+        self.assertNotIn(target, session.asked)                                # the page robots.txt blocks is never asked for
+        self.assertEqual(session.follow[-1], False)
+
+    def test_an_address_that_is_not_a_web_address_is_not_asked(self):
+        for url in ("", "mailto:a@b.c", "javascript:alert(1)", "/relative"):
+            self.assertEqual(liveness.check_page(page_row(url)), "unknown", url)
+
+    def test_a_sweep_records_what_the_pages_say_and_skips_sources_that_are_never_asked(self):
+        a, b, c = "https://site.example/jobs/1", "https://site.example/jobs/2", "https://site.example/jobs/3"
+        rows = [page_row(a, jid="hm:a:1"), page_row(b, jid="hm:a:2"), page_row(c, source="smartrecruiters", jid="sr:a:3"),
+                page_row(c, source="usajobs", jid="usajobs:3")]
+        session = FakeSession({"https://site.example/robots.txt": FakeResponse(200, ""), a: FakeResponse(200), b: FakeResponse(404), c: FakeResponse(404)})
+        recorded = {}
+        with mock.patch.object(sources, "_session", lambda: session), mock.patch.object(liveness.time, "sleep"), \
+                mock.patch.object(liveness, "record", lambda conn, results, now=None: recorded.update(results)):
+            counts = liveness.sweep(mock.Mock(), rows, delay=0)
+        self.assertEqual(recorded, {"hm:a:1": "open", "hm:a:2": "closed"})
+        self.assertEqual(counts, {"open": 1, "closed": 1, "unknown": 0})
+        self.assertNotIn(c, session.asked)
 
 
 class LivenessBase(Base):
@@ -140,7 +274,7 @@ class StoringTests(LivenessBase):
 
     def test_a_sweep_asks_each_board_once_and_each_workday_job_on_its_own(self):
         rows = [wd_row("wd:acme:1"), wd_row("wd:acme:2"), {"id": "gh:acme:1", "url": "", "title": "t", "company": "c"},
-                {"id": "gh:acme:2", "url": "", "title": "t", "company": "c"}, {"id": "jo:9", "url": "", "title": "t", "company": "c"}]
+                {"id": "gh:acme:2", "url": "", "title": "t", "company": "c"}, {"id": "hn:9", "url": "", "title": "t", "company": "c"}]
         for r in rows:
             self.have(r["id"])
         asked = []
@@ -151,9 +285,9 @@ class StoringTests(LivenessBase):
             counts = liveness.sweep(conn, rows, delay=0)
         conn.close()
         self.assertEqual(asked, ["acme"])                              # one request for the board, however many of its jobs there are
-        self.assertEqual(counts, {"open": 2, "closed": 2, "unknown": 0})   # jo:9 cannot be asked, so it is not counted
-        self.assertEqual([self.state(i)[0] for i in ("wd:acme:1", "wd:acme:2", "gh:acme:1", "gh:acme:2", "jo:9")], [False, True, False, True, False])
-        self.assertEqual(self.state("jo:9"), (False, False))
+        self.assertEqual(counts, {"open": 2, "closed": 2, "unknown": 0})   # hn:9 cannot be asked, so it is not counted
+        self.assertEqual([self.state(i)[0] for i in ("wd:acme:1", "wd:acme:2", "gh:acme:1", "gh:acme:2", "hn:9")], [False, True, False, True, False])
+        self.assertEqual(self.state("hn:9"), (False, False))
 
     def test_a_workday_site_that_refuses_everything_is_not_taken_for_closed(self):
         rows = [wd_row(f"wd:blocked:{i}") for i in range(liveness.BLOCKED_AFTER)] + [wd_row(f"wd:fine:{i}") for i in range(2)]
@@ -187,7 +321,7 @@ class StoringTests(LivenessBase):
         self.have("gh:a:4", score=90, checked=now - DAY * 2)           # asked, but long ago: due
         self.have("gh:a:5", score=90, checked=now - 3600)              # asked lately
         self.have("gh:a:6", score=90, status="applied")                # applied: not looking at it
-        self.have("jo:7", score=90)                                    # cannot be asked
+        self.have("hn:7", score=90)                                    # cannot be asked
         conn = self.conn()
         ids = [r["id"] for r in liveness.due_rows(conn, 60, now=now)]
         conn.close()
@@ -195,7 +329,7 @@ class StoringTests(LivenessBase):
 
     def test_one_job_is_asked_about_unless_it_was_asked_lately(self):
         now = time.time()
-        a, b, c = self.have("gh:a:1"), self.have("gh:b:1", checked=now - 3600), self.have("jo:1")
+        a, b, c = self.have("gh:a:1"), self.have("gh:b:1", checked=now - 3600), self.have("hn:1")
         conn = self.conn()
         with mock.patch.object(sources, "fetch_greenhouse", lambda slug: []) as fetch:
             self.assertEqual(liveness.check_job(conn, a)["state"], "closed")
@@ -236,12 +370,12 @@ class EffectTests(LivenessBase):
 
     def test_the_page_is_told_when_a_job_is_open_and_when_its_source_cannot_be_asked(self):
         self.have("gh:a:1")
-        self.have("jo:2")
+        self.have("hn:2")
         conn = self.conn()
         rows = {r["id"]: viewer.job_dict(r) for r in conn.execute("SELECT * FROM jobs").fetchall()}
         conn.close()
         self.assertEqual((rows["gh:a:1"]["closed"], rows["gh:a:1"]["can_check"]), (False, True))
-        self.assertEqual((rows["jo:2"]["closed"], rows["jo:2"]["can_check"]), (False, False))
+        self.assertEqual((rows["hn:2"]["closed"], rows["hn:2"]["can_check"]), (False, False))
 
     def test_a_taken_down_job_is_not_scored(self):
         add_posting(self.admin, "p1", "Software Engineer", company="A")
